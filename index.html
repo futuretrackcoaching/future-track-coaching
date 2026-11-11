@@ -1,1 +1,67 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Future Track Coaching | Portal</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#060A12',
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="style.css">
+    <!-- Neon Serverless Driver CDN -->
+    <script src="https://unpkg.com/@neondatabase/serverless@latest/bundle.production.min.js"></script>
+    <!-- Database Configuration -->
+    <script src="db-config.js" defer></script>
+</head>
+<body class="bg-darkBg text-white min-h-screen font-sans selection:bg-blue-500 selection:text-white flex flex-col justify-between">
+
+    <!-- Header Navigation -->
+    <header class="sticky top-0 z-50 backdrop-blur-xl bg-[#060A12]/80 border-b border-white/10 px-6 py-4">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="loadPage('home')">
+                <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/20">FT</div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-tight">Future Track</h1>
+                    <p class="text-xs text-gray-400">Vishnu Garden, New Delhi</p>
+                </div>
+            </div>
+            
+            <nav class="hidden md:flex gap-2">
+                <button onclick="loadPage('home')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Home</button>
+                <button onclick="loadPage('material')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Study Vault</button>
+                <button onclick="loadPage('quiz')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Quizzes</button>
+                <button onclick="loadPage('test')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Test Series</button>
+                <button onclick="loadPage('admin')" class="px-4 py-2 rounded-xl text-sm font-medium bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/35 transition">Admin</button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Dynamic Content Container -->
+    <main id="app" class="max-w-6xl mx-auto p-6 w-full flex-grow">
+        <!-- Subpages load dynamically here -->
+    </main>
+
+    <!-- Mobile Navigation Bar -->
+    <div class="md:hidden sticky bottom-0 backdrop-blur-2xl bg-[#060A12]/90 border-t border-white/10 p-3 flex justify-around z-50">
+        <button onclick="loadPage('home')" class="text-xs flex flex-col items-center gap-1 text-gray-300">🏠 Home</button>
+        <button onclick="loadPage('material')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📚 Vault</button>
+        <button onclick="loadPage('quiz')" class="text-xs flex flex-col items-center gap-1 text-gray-300">✍️ Quiz</button>
+        <button onclick="loadPage('test')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📅 Tests</button>
+        <button onclick="loadPage('admin')" class="text-xs flex flex-col items-center gap-1 text-blue-400">🔐 Admin</button>
+    </div>
+
+    <!-- Script Router Link -->
+    <script src="script.js"></script>
+</body>
+</html>
