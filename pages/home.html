@@ -1,1 +1,28 @@
-i
+<div class="space-y-6">
+    <!-- Hero Glass Card -->
+    <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+        <div class="absolute -right-10 -top-10 w-40 h-40 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
+        <span class="px-3 py-1 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">Class 11 & 12 • Commerce & Foundation</span>
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight mt-4 mb-2">Future Track Coaching Institute</h1>
+        <p class="text-gray-400 text-sm md:text-base max-w-2xl">Mentored by Anuj Tyagi Sir (CS, B.Com, LLB) in Vishnu Garden, New Delhi. Master Accountancy, Economics, and Business Studies with precision.</p>
+        
+        <div class="mt-6 flex flex-wrap gap-4">
+            <button onclick="loadPage('material')" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-medium transition shadow-lg shadow-blue-600/30">Open Study Vault</button>
+            <button onclick="loadPage('quiz')" class="bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-2xl font-medium transition border border-white/10">Attempt Quizzes</button>
+        </div>
+    </div>
+
+    <!-- Quick Portal Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div onclick="loadPage('test')" class="bg-white/5 hover:bg-white/[0.07] transition cursor-pointer backdrop-blur-xl border border-white/10 p-6 rounded-3xl">
+            <div class="text-2xl mb-3">📅</div>
+            <h3 class="text-lg font-bold mb-1">Center Test Series</h3>
+            <p class="text-xs text-gray-400">Track upcoming offline test schedules, syllabus divisions, and examination venue details for New Delhi batches.</p>
+        </div>
+        <div onclick="loadPage('admin')" class="bg-white/5 hover:bg-white/[0.07] transition cursor-pointer backdrop-blur-xl border border-white/10 p-6 rounded-3xl">
+            <div class="text-2xl mb-3">🔐</div>
+            <h3 class="text-lg font-bold mb-1">Faculty Admin Console</h3>
+            <p class="text-xs text-gray-400">Secure management panel protected by your PIN to publish quizzes, upload study vault PDFs, and schedule tests.</p>
+        </div>
+    </div>
+</div>
