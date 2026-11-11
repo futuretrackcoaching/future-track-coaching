@@ -4,25 +4,78 @@
         <div class="absolute -right-10 -top-10 w-40 h-40 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
         <span class="px-3 py-1 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">Class 11 & 12 • Commerce & Foundation</span>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight mt-4 mb-2">Future Track Coaching Institute</h1>
-        <p class="text-gray-400 text-sm md:text-base max-w-2xl">Mentored by Anuj Tyagi Sir (CS, B.Com, LLB) in Subash Nagar/Hari Nagar, New Delhi. Master Accountancy, Economics, and Business Studies with precision.</p>
+        <p class="text-gray-400 text-sm md:text-base max-w-2xl">Excellence in Accountancy, Economics, and Business Studies. Master your board exams with structured guidance.</p>
         
-        <div class="mt-6 flex flex-wrap gap-4">
-            <button onclick="loadPage('material')" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-medium transition shadow-lg shadow-blue-600/30">Open Study Vault</button>
-            <button onclick="loadPage('quiz')" class="bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-2xl font-medium transition border border-white/10">Attempt Quizzes</button>
+        <!-- Quick Links (Admin hidden via #ftadmin shortcut) -->
+        <div class="mt-6 flex flex-wrap gap-3">
+            <button onclick="loadPage('material')" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-2xl font-medium transition shadow-lg shadow-blue-600/30 text-sm">📚 Study Vault</button>
+            <button onclick="loadPage('quiz')" class="bg-white/5 hover:bg-white/10 text-white px-5 py-2.5 rounded-2xl font-medium transition border border-white/10 text-sm">✍️ Quizzes</button>
+            <button onclick="loadPage('test')" class="bg-white/5 hover:bg-white/10 text-white px-5 py-2.5 rounded-2xl font-medium transition border border-white/10 text-sm">📅 Test Series</button>
+            <a href="#ftadmin" onclick="checkSecretAdmin(event)" class="text-gray-500 hover:text-gray-400 text-xs self-center ml-auto">🔒 Admin Portal</a>
         </div>
     </div>
 
-    <!-- Quick Portal Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div onclick="loadPage('test')" class="bg-white/5 hover:bg-white/[0.07] transition cursor-pointer backdrop-blur-xl border border-white/10 p-6 rounded-3xl">
-            <div class="text-2xl mb-3">📅</div>
-            <h3 class="text-lg font-bold mb-1">Center Test Series</h3>
-            <p class="text-xs text-gray-400">Track upcoming offline test schedules, syllabus divisions, and examination venue details for New Delhi batches.</p>
+    <!-- Faculty Section -->
+    <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-xl">
+        <h2 class="text-2xl font-bold mb-4">Our Expert Faculty</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Teacher Card 1 -->
+            <div class="bg-white/5 border border-white/10 p-5 rounded-2xl">
+                <h3 class="font-bold text-lg text-blue-400">Anuj Tyagi Sir</h3>
+                <p class="text-xs text-gray-400 mb-2">Accountancy, Economics & Business Studies</p>
+                <p class="text-xs text-gray-300">Dedicated mentor focused on conceptual clarity, numerical precision, and rigorous past-year board paper practice.</p>
+            </div>
+            <!-- Teacher Card 2 (Ready for your data) -->
+            <div class="bg-white/5 border border-white/10 p-5 rounded-2xl">
+                <h3 class="font-bold text-lg text-blue-400">Faculty Member</h3>
+                <p class="text-xs text-gray-400 mb-2">Subject Expert</p>
+                <p class="text-xs text-gray-300">Specialized training for commerce stream foundations and school assessments.</p>
+            </div>
         </div>
-        <div onclick="loadPage('admin')" class="bg-white/5 hover:bg-white/[0.07] transition cursor-pointer backdrop-blur-xl border border-white/10 p-6 rounded-3xl">
-            <div class="text-2xl mb-3">🔐</div>
-            <h3 class="text-lg font-bold mb-1">Faculty Admin Console</h3>
-            <p class="text-xs text-gray-400">Secure management panel protected by your PIN to publish quizzes, upload study vault PDFs, and schedule tests.</p>
+    </div>
+
+    <!-- Map, Contact & Socials Section -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Interactive Map Embed -->
+        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col justify-between">
+            <div>
+                <h3 class="text-lg font-bold mb-2">Visit Our Center</h3>
+                <p class="text-xs text-gray-400 mb-4">2nd Floor, 4/8, Block 17, Block 5, Subhash Nagar, Delhi, 110027</p>
+            </div>
+            <div class="w-full h-48 rounded-2xl overflow-hidden border border-white/10">
+                <iframe 
+                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3501.9774641971714!2d77.1089!3d28.638!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x390d04b443456e29%3A0x82bbcbe28e21867a!2sSubhash%20Nagar%2C%20Delhi!5e0!3m2!1sen!2sin!4v1650000000000!5m2!1sen!2sin" 
+                    width="100%" 
+                    height="100%" 
+                    style="border:0;" 
+                    allowfullscreen="" 
+                    loading="lazy">
+                </iframe>
+            </div>
+        </div>
+
+        <!-- Contact & Instagram Details -->
+        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col justify-between space-y-4">
+            <div>
+                <h3 class="text-lg font-bold mb-3">Get in Touch</h3>
+                <div class="space-y-3 text-sm">
+                    <div class="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
+                        <span class="text-xl">📞</span>
+                        <div>
+                            <p class="text-xs text-gray-400">Call / WhatsApp</p>
+                            <a href="tel:07838197007" class="font-medium text-blue-400 hover:underline">078381 97007</a>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
+                        <span class="text-xl">📸</span>
+                        <div>
+                            <p class="text-xs text-gray-400">Instagram Handle</p>
+                            <a href="https://instagram.com" target="_blank" class="font-medium text-blue-400 hover:underline">@futuretrackcoaching</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <p class="text-[11px] text-gray-500 text-center">Future Track Coaching Institute • Built for Commerce Achievers</p>
         </div>
     </div>
 </div>
