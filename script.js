@@ -21,18 +21,23 @@ async function loadPage(pageName) {
     }
 }
 
-// Secret Admin Access Handler (Triggered from the secret link on Home)
-function checkSecretAdmin(event) {
-    event.preventDefault();
-    const pin = prompt("Enter Admin Secret PIN:");
-    if (pin === "1234") { // You can change this PIN anytime
-        loadPage('admin');
-    } else if (pin !== null) {
-        alert("Incorrect PIN");
+// Check URL hash for secret admin access (#ftadmin)
+function handleRoute() {
+    const hash = window.location.hash;
+    if (hash === '#ftadmin') {
+        const pin = prompt("Enter Admin Secret PIN:");
+        if (pin === "1234") { // Change PIN as needed
+            loadPage('admin');
+        } else {
+            alert("Incorrect PIN");
+            window.location.hash = '#home';
+            loadPage('home');
+        }
+    } else {
+        loadPage('home');
     }
 }
 
-// Automatically load the home page when the portal opens
-window.addEventListener('DOMContentLoaded', () => {
-    loadPage('home');
-});
+// Listen for hash changes and initial load
+window.addEventListener('DOMContentLoaded', handleRoute);
+window.addEventListener('hashchange', handleRoute);
