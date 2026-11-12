@@ -72,30 +72,42 @@
         </div>
     </div>
 
-    <!-- Tuition Photo Gallery Section (Placed before maps) -->
+      <!-- Tuition Photo Slideshow Section (Placed before maps) -->
     <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-xl">
-        <h3 class="text-xl font-bold mb-4">Life at Future Track</h3>
+        <h3 class="text-xl font-bold mb-2">Life at Future Track</h3>
         <p class="text-xs text-gray-400 mb-6">A glimpse inside our classrooms, interactive sessions, and learning environment in Subhash Nagar.</p>
         
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <!-- Photo 1 -->
-            <div class="relative overflow-hidden rounded-2xl border border-white/10 group aspect-video bg-white/5 flex items-center justify-center">
-                <img src="tuition1.jpg" alt="Tuition Photo 1" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=600&q=80';">
+        <!-- Slideshow Wrapper -->
+        <div class="relative overflow-hidden rounded-2xl border border-white/10 aspect-video bg-white/5 shadow-inner">
+            <div id="slideshow-container" class="relative w-full h-full">
+                <!-- Slide 1 -->
+                <div class="slide absolute inset-0 transition-opacity duration-1000 opacity-100">
+                    <img src="tuition1.jpg" alt="Tuition Class 1" class="w-full h-full object-cover" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=800&q=80';">
+                </div>
+                <!-- Slide 2 -->
+                <div class="slide absolute inset-0 transition-opacity duration-1000 opacity-0">
+                    <img src="tuition2.jpg" alt="Tuition Class 2" class="w-full h-full object-cover" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1580582932707-520aed937b7b?auto=format&fit=crop&w=800&q=80';">
+                </div>
+                <!-- Slide 3 -->
+                <div class="slide absolute inset-0 transition-opacity duration-1000 opacity-0">
+                    <img src="tuition3.jpg" alt="Tuition Class 3" class="w-full h-full object-cover" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?auto=format&fit=crop&w=800&q=80';">
+                </div>
+                <!-- Slide 4 -->
+                <div class="slide absolute inset-0 transition-opacity duration-1000 opacity-0">
+                    <img src="tuition4.jpg" alt="Tuition Class 4" class="w-full h-full object-cover" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80';">
+                </div>
             </div>
-            <!-- Photo 2 -->
-            <div class="relative overflow-hidden rounded-2xl border border-white/10 group aspect-video bg-white/5 flex items-center justify-center">
-                <img src="tuition2.jpg" alt="Tuition Photo 2" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1580582932707-520aed937b7b?auto=format&fit=crop&w=600&q=80';">
-            </div>
-            <!-- Photo 3 -->
-            <div class="relative overflow-hidden rounded-2xl border border-white/10 group aspect-video bg-white/5 flex items-center justify-center">
-                <img src="tuition3.jpg" alt="Tuition Photo 3" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?auto=format&fit=crop&w=600&q=80';">
-            </div>
-            <!-- Photo 4 -->
-            <div class="relative overflow-hidden rounded-2xl border border-white/10 group aspect-video bg-white/5 flex items-center justify-center">
-                <img src="tuition4.jpg" alt="Tuition Photo 4" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=600&q=80';">
+
+            <!-- Slide Indicator Dots -->
+            <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-2 z-10">
+                <span class="dot w-2 h-2 rounded-full bg-white/50 transition-all duration-300"></span>
+                <span class="dot w-2 h-2 rounded-full bg-white/50 transition-all duration-300"></span>
+                <span class="dot w-2 h-2 rounded-full bg-white/50 transition-all duration-300"></span>
+                <span class="dot w-2 h-2 rounded-full bg-white/50 transition-all duration-300"></span>
             </div>
         </div>
     </div>
+
 
     <!-- Map, Contact & Socials Section -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
