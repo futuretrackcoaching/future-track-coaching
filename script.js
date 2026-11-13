@@ -41,3 +41,36 @@ function handleRoute() {
 // Listen for hash changes and initial load
 window.addEventListener('DOMContentLoaded', handleRoute);
 window.addEventListener('hashchange', handleRoute);
+// Automated Photo Slideshow Logic (Changes every 5 seconds)
+function initSlideshow() {
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+    const dots = document.querySelectorAll('.dot');
+
+    if (slides.length === 0) return; // Exit if not on home page
+
+    setInterval(() => {
+        // Hide current slide & reset dot
+        slides[currentSlide].style.opacity = '0';
+        if (dots[currentSlide]) dots[currentSlide].classList.remove('bg-white', 'w-4');
+
+        // Move to next slide
+        currentSlide = (currentSlide + 1) % slides.length;
+
+        // Show new slide & highlight dot
+        slides[currentSlide].style.opacity = '1';
+        if (dots[currentSlide]) {
+            dots[currentSlide].classList.add('bg-white', 'w-4');
+        }
+    }, 5000); // 5000ms = 5 seconds
+}
+
+// Hook slideshow into the page router so it starts when Home loads
+const originalLoadPage = loadPage;
+loadPage = async function(pageName) {
+    await originalLoadPage(pageName);
+    if (pageName === 'home') {
+        setTimeout(initSlideshow, 100); // Initialize after HTML is injected
+    }
+};
+
