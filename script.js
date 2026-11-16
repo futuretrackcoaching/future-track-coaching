@@ -1,3 +1,5 @@
+// --- CENTRALIZED ROUTER & SLIDESHOW LOGIC ---
+
 // Function to dynamically load pages from the 'pages/' folder into the main container
 async function loadPage(pageName) {
     try {
@@ -21,15 +23,32 @@ async function loadPage(pageName) {
     }
 }
 
-// Check URL hash for secret admin access (#ftadmin)
-function handleRoute() {
+// Check URL hash for secret admin access (#ftadmin) verifying against Neon database
+async function handleRoute() {
     const hash = window.location.hash;
     if (hash === '#ftadmin') {
-        const pin = prompt("Enter Admin Secret PIN:");
-        if (pin === "1234") { // Change PIN as needed
-            loadPage('admin');
-        } else {
-            alert("Incorrect PIN");
+        const enteredPin = prompt("Enter Admin Secret PIN:");
+        if (!enteredPin) {
+            window.location.hash = '#home';
+            loadPage('home');
+            return;
+        }
+
+        try {
+            // Fetch the admin PIN stored in your Neon database
+            const res = await queryDatabase('SELECT pin_code FROM admin_settings LIMIT 1');
+            const correctPin = res.length > 0 ? res[0].pin_code : '1234'; // Fallback to '1234' if empty
+
+            if (enteredPin === correctPin) {
+                loadPage('admin');
+            } else {
+                alert("Incorrect PIN");
+                window.location.hash = '#home';
+                loadPage('home');
+            }
+        } catch (err) {
+            console.error("Database error checking admin PIN:", err);
+            alert("Connection error. Try again.");
             window.location.hash = '#home';
             loadPage('home');
         }
@@ -38,9 +57,6 @@ function handleRoute() {
     }
 }
 
-// Listen for hash changes and initial load
-window.addEventListener('DOMContentLoaded', handleRoute);
-window.addEventListener('hashchange', handleRoute);
 // Automated Photo Slideshow Logic (Changes every 5 seconds)
 function initSlideshow() {
     let currentSlide = 0;
@@ -65,15 +81,24 @@ function initSlideshow() {
     }, 5000); // 5000ms = 5 seconds
 }
 
-// Hook slideshow into the page router so it starts when Home loads
+// Hook slideshow and quiz initializers into the page router
 const originalLoadPage = loadPage;
 loadPage = async function(pageName) {
     await originalLoadPage(pageName);
     if (pageName === 'home') {
-        setTimeout(initSlideshow, 100); // Initialize after HTML is injected
+        setTimeout(initSlideshow, 100); // Initialize slideshow after HTML is injected
+    } else if (pageName === 'quiz') {
+        loadQuizzesList(); // Initialize quiz vault list
     }
 };
+
+// Listen for hash changes and initial load
+window.addEventListener('DOMContentLoaded', handleRoute);
+window.addEventListener('hashchange', handleRoute);
+
+
 // --- ADMIN FUNCTIONS ---
+
 async function handlePostMaterial(e) {
     e.preventDefault();
     const title = document.getElementById('mat-title').value;
@@ -122,7 +147,9 @@ async function handleCreateQuiz(e) {
     } catch (err) { alert('Error creating quiz'); }
 }
 
+
 // --- QUIZ PORTAL FUNCTIONS ---
+
 let activeQuizTimer = null;
 let secondsElapsed = 0;
 
@@ -279,13 +306,3 @@ async function loadQuizResultsView(quizId) {
         portal.innerHTML = `<p class="text-red-400 text-sm">Error loading rankings.</p>`;
     }
 }
-
-// Hook quiz loader into router
-const oldRouter = loadPage;
-loadPage = async function(pageName) {
-    await oldRouter(pageName);
-    if (pageName === 'quiz') {
-        loadQuizzesList();
-    }
-};
-
