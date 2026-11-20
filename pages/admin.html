@@ -1,11 +1,10 @@
 <div class="space-y-8 max-w-4xl mx-auto pb-12">
-    <!-- Admin Header -->
     <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-xl flex justify-between items-center">
         <div>
             <h1 class="text-2xl font-extrabold text-blue-400">🔐 Faculty Admin Console</h1>
             <p class="text-xs text-gray-400 mt-1">Manage study materials, test timetables, quizzes, and student rankings.</p>
         </div>
-        <button onclick="loadPage('home')" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">Exit Admin</button>
+        <button type="button" onclick="loadPage('home')" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">Exit Admin</button>
     </div>
 
     <!-- 1. Post New Study Material -->
@@ -14,7 +13,7 @@
         <form id="material-form" onsubmit="handlePostMaterial(event)" class="space-y-3">
             <input type="text" id="mat-title" placeholder="Material Title (e.g., Accounts Chapter 1 Notes)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
             <input type="text" id="mat-subject" placeholder="Subject (e.g., Accountancy)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
-            <input type="url" id="mat-url" placeholder="PDF File URL (Google Drive / Cloudinary Link)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
+            <input type="url" id="mat-url" placeholder="PDF File URL (Google Drive / Link)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
             <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-2xl text-sm font-medium transition shadow-lg shadow-blue-600/30">Upload Material</button>
         </form>
     </div>
@@ -37,15 +36,15 @@
         <form id="quiz-form" onsubmit="handleCreateQuiz(event)" class="space-y-3">
             <input type="text" id="quiz-title" placeholder="Quiz Title (e.g., Partnership Accounts Quiz 1)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
             <input type="text" id="quiz-subject" placeholder="Subject (e.g., Accountancy)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
-            
+
             <div class="border-t border-white/10 pt-3 mt-3">
                 <h3 class="text-sm font-semibold mb-2 text-blue-300">Add First Question</h3>
-                <input type="text" id="q-text" placeholder="Question Text" class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm mb-2 focus:outline-none focus:border-blue-500">
+                <input type="text" id="q-text" placeholder="Question Text" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm mb-2 focus:outline-none focus:border-blue-500">
                 <div class="grid grid-cols-2 gap-2 mb-2">
-                    <input type="text" id="q-optA" placeholder="Option A" class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
-                    <input type="text" id="q-optB" placeholder="Option B" class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
-                    <input type="text" id="q-optC" placeholder="Option C" class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
-                    <input type="text" id="q-optD" placeholder="Option D" class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
+                    <input type="text" id="q-optA" placeholder="Option A" required class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
+                    <input type="text" id="q-optB" placeholder="Option B" required class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
+                    <input type="text" id="q-optC" placeholder="Option C" required class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
+                    <input type="text" id="q-optD" placeholder="Option D" required class="bg-white/5 border border-white/10 p-2.5 rounded-xl text-sm">
                 </div>
                 <select id="q-correct" class="w-full bg-[#060A12] border border-white/10 p-3 rounded-2xl text-sm text-gray-300 mb-2">
                     <option value="A">Correct Option: A</option>
