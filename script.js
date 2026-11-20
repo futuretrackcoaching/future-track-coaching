@@ -625,3 +625,20 @@ window.addEventListener("message", async (event) => {
         console.error("Failed to save HTML quiz result:", err);
     }
 });
+const params = new URLSearchParams(window.location.search);
+const quizId = Number(params.get("quizId"));
+
+function sendResultToPortal(studentName, marks, totalMarks, timeTakenSeconds) {
+    window.parent.postMessage({
+        type: "FT_QUIZ_RESULT",
+        quizId,
+        studentName,
+        marks,
+        totalMarks,
+        timeTakenSeconds
+    }, "*");
+}
+
+// Example: call this inside your quiz submit handler
+// sendResultToPortal("Riya Sharma", 8, 10, 145);
+
