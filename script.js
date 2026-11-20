@@ -1,24 +1,73 @@
 // ============================================================================
-// PART 1: ROUTER, PAGE LOADER, SLIDESHOW, VAULT/TESTS & ADMIN HANDLERS
+// PART 1: CLASS STATE, STUDENT NAME CACHE, ROUTER & ADMIN CRUD
 // ============================================================================
 
 let domLoaded = false;
 let neonLoaded = Boolean(window.neon);
 let slideshowInterval = null;
 let allQuizzesCache = [];
+let allMaterialsCache = [];
+let allTestsCache = [];
 let activeQuizTimer = null;
 let secondsElapsed = 0;
 let quizWatcherInterval = null;
 let currentActiveQuizSession = null;
 
+const CLASS_STORAGE_KEY = "ft_selected_class";
+const STUDENT_NAME_STORAGE_KEY = "ft_cached_student_name";
+
+function getSelectedClass() {
+    return localStorage.getItem(CLASS_STORAGE_KEY) || "All";
+}
+
+function setActiveClass(classValue) {
+    localStorage.setItem(CLASS_STORAGE_KEY, classValue || "All");
+    syncClassSelectorUI();
+
+    const filterClassEl = document.getElementById("filter-class");
+    if (filterClassEl) {
+        filterClassEl.value = classValue === "All" ? "all" : classValue;
+    }
+
+    if (document.getElementById("quiz-list")) filterQuizzes();
+    if (document.getElementById("materials-list")) renderMaterials(allMaterialsCache);
+    if (document.getElementById("tests-list")) renderTests(allTestsCache);
+}
+
+function syncClassSelectorUI() {
+    const active = getSelectedClass();
+    document.querySelectorAll(".class-pill").forEach(btn => {
+        if (btn.dataset.class === active) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+}
+
+function getCachedStudentName() {
+    return (localStorage.getItem(STUDENT_NAME_STORAGE_KEY) || "").trim();
+}
+
+function setCachedStudentName(name) {
+    const clean = String(name || "").trim();
+    if (clean) {
+        localStorage.setItem(STUDENT_NAME_STORAGE_KEY, clean);
+    } else {
+        localStorage.removeItem(STUDENT_NAME_STORAGE_KEY);
+    }
+}
+
 function tryStartApp() {
     if (domLoaded && neonLoaded) {
+        syncClassSelectorUI();
         handleRoute();
     }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
     domLoaded = true;
+    syncClassSelectorUI();
     tryStartApp();
 });
 
@@ -59,6 +108,7 @@ async function loadPage(pageName) {
         }
         const htmlContent = await response.text();
         document.getElementById("app").innerHTML = htmlContent;
+        syncClassSelectorUI();
         window.scrollTo({ top: 0, behavior: "smooth" });
 
         if (pageName === "home") {
@@ -69,11 +119,13 @@ async function loadPage(pageName) {
             await loadMaterialsList();
         } else if (pageName === "test") {
             await loadTestsList();
+        } else if (pageName === "admin") {
+            await loadAdminManageLists();
         }
     } catch (error) {
         console.error("Error loading page:", error);
         document.getElementById("app").innerHTML = `
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl text-center max-w-lg mx-auto mt-12 shadow-2xl">
+            <div class="glass-card p-8 rounded-3xl text-center max-w-lg mx-auto mt-12">
                 <h2 class="text-xl font-bold text-red-400 mb-2">Page Not Found</h2>
                 <p class="text-gray-400 text-sm">Could not load <code class="text-blue-300">pages/${escapeHtml(pageName)}.html</code>.</p>
             </div>
@@ -138,28 +190,49 @@ function initSlideshow() {
     }, 5000);
 }
 
+// --- STUDY VAULT & TEST SERIES ---
+
+function matchesSelectedClass(itemClass) {
+    const selected = getSelectedClass();
+    if (!selected || selected === "All") return true;
+    const normalized = String(itemClass || "All").toLowerCase();
+    return normalized === "all" || normalized === selected.toLowerCase();
+}
+
 async function loadMaterialsList() {
     const container = document.getElementById("materials-list");
     if (!container) return;
 
     try {
-        const materials = await queryDatabase("SELECT * FROM study_materials ORDER BY uploaded_at DESC");
-        if (!materials || materials.length === 0) {
-            container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No study materials uploaded yet.</p>`;
-            return;
-        }
-        container.innerHTML = materials.map(m => `
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col justify-between space-y-4">
-                <div>
-                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(m.subject)}</span>
-                    <h3 class="text-lg font-bold mt-2">${escapeHtml(m.title)}</h3>
-                </div>
-                <a href="${escapeHtml(m.file_url)}" target="_blank" rel="noopener noreferrer" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-blue-600/30">Open / Download PDF</a>
-            </div>
-        `).join("");
+        allMaterialsCache = await queryDatabase("SELECT * FROM study_materials ORDER BY uploaded_at DESC");
+        renderMaterials(allMaterialsCache);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load materials: ${escapeHtml(err.message)}</p>`;
     }
+}
+
+function renderMaterials(items) {
+    const container = document.getElementById("materials-list");
+    if (!container) return;
+
+    const filtered = (items || []).filter(m => matchesSelectedClass(m.class_level));
+    if (filtered.length === 0) {
+        container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No study materials for ${escapeHtml(getSelectedClass())} yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = filtered.map(m => `
+        <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(m.class_level || "All")}</span>
+                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(m.subject)}</span>
+                </div>
+                <h3 class="text-lg font-bold mt-2">${escapeHtml(m.title)}</h3>
+            </div>
+            <a href="${escapeHtml(m.file_url)}" target="_blank" rel="noopener noreferrer" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-blue-600/30">Open / Download PDF</a>
+        </div>
+    `).join("");
 }
 
 async function loadTestsList() {
@@ -167,42 +240,68 @@ async function loadTestsList() {
     if (!container) return;
 
     try {
-        const tests = await queryDatabase("SELECT * FROM test_timetables ORDER BY test_date ASC");
-        if (!tests || tests.length === 0) {
-            container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No upcoming tests scheduled yet.</p>`;
-            return;
-        }
-        container.innerHTML = tests.map(t => {
-            const formattedDate = new Date(t.test_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-            return `
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-2">
-                    <div class="flex justify-between items-center">
-                        <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(t.subject)}</span>
-                        <span class="text-xs text-gray-400">📅 ${escapeHtml(formattedDate)}</span>
-                    </div>
-                    <h3 class="text-lg font-bold pt-1">${escapeHtml(t.test_name)}</h3>
-                    <p class="text-xs text-gray-300">${escapeHtml(t.syllabus)}</p>
-                </div>
-            `;
-        }).join("");
+        allTestsCache = await queryDatabase("SELECT * FROM test_timetables ORDER BY test_date ASC");
+        renderTests(allTestsCache);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load test schedule: ${escapeHtml(err.message)}</p>`;
     }
 }
 
+function renderTests(items) {
+    const container = document.getElementById("tests-list");
+    if (!container) return;
+
+    const filtered = (items || []).filter(t => matchesSelectedClass(t.class_level));
+    if (filtered.length === 0) {
+        container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No tests scheduled for ${escapeHtml(getSelectedClass())} yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = filtered.map(t => {
+        const formattedDate = new Date(t.test_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+        const hasResultPdf = Boolean(t.result_pdf_url && String(t.result_pdf_url).trim());
+
+        return `
+            <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
+                <div class="space-y-2">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(t.class_level || "All")}</span>
+                            <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(t.subject)}</span>
+                        </div>
+                        <span class="text-xs text-gray-400">📅 ${escapeHtml(formattedDate)}</span>
+                    </div>
+                    <h3 class="text-lg font-bold pt-1">${escapeHtml(t.test_name)}</h3>
+                    <p class="text-xs text-gray-300">${escapeHtml(t.syllabus)}</p>
+                </div>
+
+                <div class="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                    ${hasResultPdf
+                        ? `<a href="${escapeHtml(t.result_pdf_url)}" target="_blank" rel="noopener noreferrer" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-emerald-600/25">📄 View / Download Result PDF</a>`
+                        : `<span class="text-[11px] text-gray-400">Result PDF: Not published yet</span>`
+                    }
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+// --- ADMIN CREATE, EDIT & DELETE ---
+
 async function handlePostMaterial(e) {
     e.preventDefault();
+    const classLevel = document.getElementById("mat-class").value;
     const title = document.getElementById("mat-title").value.trim();
     const subject = document.getElementById("mat-subject").value.trim();
     const fileUrl = document.getElementById("mat-url").value.trim();
 
     try {
         await queryDatabase(
-            "INSERT INTO study_materials (title, subject, file_url) VALUES ($1, $2, $3)",
-            [title, subject, fileUrl]
+            "INSERT INTO study_materials (class_level, title, subject, file_url) VALUES ($1, $2, $3, $4)",
+            [classLevel, title, subject, fileUrl]
         );
-        alert("Study material posted successfully!");
+        alert("Study material posted!");
         document.getElementById("material-form").reset();
+        await loadAdminManageLists();
     } catch (err) {
         alert("Error posting material: " + err.message);
     }
@@ -210,53 +309,29 @@ async function handlePostMaterial(e) {
 
 async function handlePostTest(e) {
     e.preventDefault();
+    const classLevel = document.getElementById("test-class").value;
     const name = document.getElementById("test-name").value.trim();
     const subject = document.getElementById("test-subject").value.trim();
     const date = document.getElementById("test-date").value;
+    const resultPdf = document.getElementById("test-result-pdf").value.trim() || null;
     const syllabus = document.getElementById("test-syllabus").value.trim();
 
     try {
         await queryDatabase(
-            "INSERT INTO test_timetables (test_name, subject, test_date, syllabus) VALUES ($1, $2, $3, $4)",
-            [name, subject, date, syllabus]
+            "INSERT INTO test_timetables (class_level, test_name, subject, test_date, syllabus, result_pdf_url) VALUES ($1, $2, $3, $4, $5, $6)",
+            [classLevel, name, subject, date, syllabus, resultPdf]
         );
-        alert("Test timetable posted successfully!");
+        alert("Test schedule published!");
         document.getElementById("test-form").reset();
+        await loadAdminManageLists();
     } catch (err) {
-        alert("Error posting test timetable: " + err.message);
-    }
-}
-
-async function handleCreateQuiz(e) {
-    e.preventDefault();
-    const title = document.getElementById("quiz-title").value.trim();
-    const subject = document.getElementById("quiz-subject").value.trim();
-    const qText = document.getElementById("q-text").value.trim();
-    const optA = document.getElementById("q-optA").value.trim();
-    const optB = document.getElementById("q-optB").value.trim();
-    const optC = document.getElementById("q-optC").value.trim();
-    const optD = document.getElementById("q-optD").value.trim();
-    const correct = document.getElementById("q-correct").value;
-
-    try {
-        const quizRes = await queryDatabase(
-            "INSERT INTO quizzes (title, subject) VALUES ($1, $2) RETURNING id",
-            [title, subject]
-        );
-        const quizId = quizRes[0].id;
-        await queryDatabase(
-            "INSERT INTO quiz_questions (quiz_id, question_text, option_a, option_b, option_c, option_d, correct_option) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            [quizId, qText, optA, optB, optC, optD, correct]
-        );
-        alert("Quiz and question created successfully!");
-        document.getElementById("quiz-form").reset();
-    } catch (err) {
-        alert("Error creating quiz: " + err.message);
+        alert("Error posting test: " + err.message);
     }
 }
 
 async function handleUploadHtmlQuiz(e) {
     e.preventDefault();
+    const classLevel = document.getElementById("html-quiz-class").value;
     const title = document.getElementById("html-quiz-title").value.trim();
     const subject = document.getElementById("html-quiz-subject").value.trim();
     const fileInput = document.getElementById("html-quiz-file");
@@ -268,7 +343,7 @@ async function handleUploadHtmlQuiz(e) {
     }
 
     const file = fileInput.files[0];
-    const originalBtnText = btn ? btn.textContent : "Upload & Publish Quiz";
+    const originalText = btn ? btn.textContent : "Upload & Publish Quiz";
     if (btn) {
         btn.disabled = true;
         btn.textContent = "Uploading...";
@@ -277,44 +352,269 @@ async function handleUploadHtmlQuiz(e) {
     try {
         const htmlContent = await file.text();
         const res = await queryDatabase(
-            "INSERT INTO quizzes (title, subject, html_content) VALUES ($1, $2, $3) RETURNING id",
-            [title, subject, htmlContent]
+            "INSERT INTO quizzes (class_level, title, subject, html_content) VALUES ($1, $2, $3, $4) RETURNING id",
+            [classLevel, title, subject, htmlContent]
         );
-        const newId = res[0].id;
-        const shareLink = `${window.location.origin}${window.location.pathname}#quiz-${newId}`;
-
-        alert(`Quiz uploaded successfully!\n\nShareable Link:\n${shareLink}`);
+        const shareLink = `${window.location.origin}${window.location.pathname}#quiz-${res[0].id}`;
+        alert(`Quiz uploaded!\nShare Link:\n${shareLink}`);
         document.getElementById("html-quiz-form").reset();
+        await loadAdminManageLists();
     } catch (err) {
-        alert("Error uploading HTML quiz: " + err.message);
+        alert("Error uploading quiz: " + err.message);
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = originalBtnText;
+            btn.textContent = originalText;
         }
     }
 }
+
+async function loadAdminManageLists() {
+    await Promise.all([
+        renderAdminQuizzesManage(),
+        renderAdminTestsManage(),
+        renderAdminMaterialsManage()
+    ]);
+}
+
+async function renderAdminQuizzesManage() {
+    const box = document.getElementById("admin-quizzes-list");
+    if (!box) return;
+
+    const quizzes = await queryDatabase("SELECT id, title, subject, class_level, created_at FROM quizzes ORDER BY id DESC");
+    if (!quizzes || quizzes.length === 0) {
+        box.innerHTML = `<p class="text-gray-400">No quizzes yet.</p>`;
+        return;
+    }
+
+    box.innerHTML = quizzes.map(q => `
+        <div class="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
+            <div class="flex flex-wrap justify-between items-center gap-2">
+                <div>
+                    <span class="text-[10px] bg-blue-500/15 text-blue-300 px-2 py-0.5 rounded-full">Class ${escapeHtml(q.class_level || "All")}</span>
+                    <span class="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded-full ml-1">${escapeHtml(q.subject)}</span>
+                    <strong class="text-sm text-white ml-2">${escapeHtml(q.title)}</strong>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="editQuizItem(${q.id})" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-3 py-1 rounded-lg">Edit</button>
+                    <button type="button" onclick="deleteQuizItem(${q.id})" class="bg-red-500/20 hover:bg-red-500/30 text-red-200 px-3 py-1 rounded-lg">Delete</button>
+                    <button type="button" onclick="toggleAdminAttempts(${q.id})" class="bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 px-3 py-1 rounded-lg">Attempts</button>
+                </div>
+            </div>
+            <div id="admin-attempts-for-quiz-${q.id}" class="hidden pt-2 border-t border-white/10"></div>
+        </div>
+    `).join("");
+}
+
+async function editQuizItem(id) {
+    const rows = await queryDatabase("SELECT id, title, subject, class_level FROM quizzes WHERE id = $1", [id]);
+    const item = rows && rows[0];
+    if (!item) return;
+
+    const newTitle = prompt("New Quiz Title:", item.title);
+    if (!newTitle) return;
+    const newSubject = prompt("New Subject:", item.subject);
+    if (!newSubject) return;
+    const newClass = prompt("New Class (8th, 9th, 10th, 11th, 12th, All):", item.class_level || "12th");
+    if (!newClass) return;
+
+    await queryDatabase(
+        "UPDATE quizzes SET title = $1, subject = $2, class_level = $3 WHERE id = $4",
+        [newTitle.trim(), newSubject.trim(), newClass.trim(), id]
+    );
+    await renderAdminQuizzesManage();
+}
+
+async function deleteQuizItem(id) {
+    if (!confirm("Delete this quiz and all its recorded attempts?")) return;
+    await queryDatabase("DELETE FROM quiz_results WHERE quiz_id = $1", [id]);
+    await queryDatabase("DELETE FROM quizzes WHERE id = $1", [id]);
+    await renderAdminQuizzesManage();
+}
+
+async function toggleAdminAttempts(quizId) {
+    const container = document.getElementById(`admin-attempts-for-quiz-${quizId}`);
+    if (!container) return;
+
+    if (!container.classList.contains("hidden")) {
+        container.classList.add("hidden");
+        return;
+    }
+
+    container.classList.remove("hidden");
+    const attempts = await queryDatabase(
+        "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY submitted_at DESC, id DESC",
+        [quizId]
+    );
+
+    if (!attempts || attempts.length === 0) {
+        container.innerHTML = `<p class="text-gray-400">No student attempts recorded.</p>`;
+        return;
+    }
+
+    container.innerHTML = attempts.map(a => `
+        <div class="flex flex-wrap justify-between items-center gap-2 py-1.5 border-b border-white/5 last:border-0">
+            <span><strong class="text-white">${escapeHtml(a.student_name)}</strong> — ${escapeHtml(a.marks)}/${escapeHtml(a.total_marks)} (${Number(a.percentage).toFixed(1)}%) • ${Number(a.time_taken_seconds)}s</span>
+            <button type="button" onclick="deleteSingleAttempt(${a.id}, ${quizId})" class="bg-red-600/25 hover:bg-red-600/40 text-red-200 px-2.5 py-1 rounded-lg">Delete Attempt</button>
+        </div>
+    `).join("");
+}
+
+async function deleteSingleAttempt(attemptId, quizId) {
+    if (!confirm("Delete this student attempt?")) return;
+    await queryDatabase("DELETE FROM quiz_results WHERE id = $1", [attemptId]);
+    const container = document.getElementById(`admin-attempts-for-quiz-${quizId}`);
+    if (container) {
+        container.classList.add("hidden");
+        await toggleAdminAttempts(quizId);
+    }
+}
+
+async function renderAdminTestsManage() {
+    const box = document.getElementById("admin-tests-list");
+    if (!box) return;
+
+    const tests = await queryDatabase("SELECT * FROM test_timetables ORDER BY test_date DESC, id DESC");
+    if (!tests || tests.length === 0) {
+        box.innerHTML = `<p class="text-gray-400">No tests scheduled yet.</p>`;
+        return;
+    }
+
+    box.innerHTML = tests.map(t => `
+        <div class="bg-white/5 border border-white/10 p-4 rounded-2xl flex flex-wrap justify-between items-center gap-2">
+            <div>
+                <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full">Class ${escapeHtml(t.class_level || "All")}</span>
+                <strong class="text-sm text-white ml-2">${escapeHtml(t.test_name)}</strong>
+                <span class="text-gray-400 ml-2">(${escapeHtml(t.subject)})</span>
+                <p class="text-[11px] text-emerald-300 mt-1">${t.result_pdf_url ? "Result PDF Attached" : "No Result PDF yet"}</p>
+            </div>
+            <div class="flex gap-2">
+                <button type="button" onclick="editTestItem(${t.id})" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-3 py-1 rounded-lg">Edit / Add PDF</button>
+                <button type="button" onclick="deleteTestItem(${t.id})" class="bg-red-500/20 hover:bg-red-500/30 text-red-200 px-3 py-1 rounded-lg">Delete</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+async function editTestItem(id) {
+    const rows = await queryDatabase("SELECT * FROM test_timetables WHERE id = $1", [id]);
+    const item = rows && rows[0];
+    if (!item) return;
+
+    const testName = prompt("Test Name:", item.test_name);
+    if (!testName) return;
+    const subject = prompt("Subject:", item.subject);
+    if (!subject) return;
+    const classLevel = prompt("Class (8th, 9th, 10th, 11th, 12th, All):", item.class_level || "12th");
+    if (!classLevel) return;
+    const syllabus = prompt("Syllabus:", item.syllabus);
+    if (!syllabus) return;
+    const resultPdf = prompt("Result PDF URL (leave blank if optional/none):", item.result_pdf_url || "");
+
+    await queryDatabase(
+        "UPDATE test_timetables SET test_name = $1, subject = $2, class_level = $3, syllabus = $4, result_pdf_url = $5 WHERE id = $6",
+        [testName.trim(), subject.trim(), classLevel.trim(), syllabus.trim(), (resultPdf || "").trim() || null, id]
+    );
+    await renderAdminTestsManage();
+}
+
+async function deleteTestItem(id) {
+    if (!confirm("Delete this test entry?")) return;
+    await queryDatabase("DELETE FROM test_timetables WHERE id = $1", [id]);
+    await renderAdminTestsManage();
+}
+
+async function renderAdminMaterialsManage() {
+    const box = document.getElementById("admin-materials-list");
+    if (!box) return;
+
+    const mats = await queryDatabase("SELECT * FROM study_materials ORDER BY id DESC");
+    if (!mats || mats.length === 0) {
+        box.innerHTML = `<p class="text-gray-400">No study materials yet.</p>`;
+        return;
+    }
+
+    box.innerHTML = mats.map(m => `
+        <div class="bg-white/5 border border-white/10 p-4 rounded-2xl flex flex-wrap justify-between items-center gap-2">
+            <div>
+                <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-0.5 rounded-full">Class ${escapeHtml(m.class_level || "All")}</span>
+                <strong class="text-sm text-white ml-2">${escapeHtml(m.title)}</strong>
+                <span class="text-gray-400 ml-2">(${escapeHtml(m.subject)})</span>
+            </div>
+            <div class="flex gap-2">
+                <button type="button" onclick="editMaterialItem(${m.id})" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-3 py-1 rounded-lg">Edit</button>
+                <button type="button" onclick="deleteMaterialItem(${m.id})" class="bg-red-500/20 hover:bg-red-500/30 text-red-200 px-3 py-1 rounded-lg">Delete</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+async function editMaterialItem(id) {
+    const rows = await queryDatabase("SELECT * FROM study_materials WHERE id = $1", [id]);
+    const item = rows && rows[0];
+    if (!item) return;
+
+    const title = prompt("Material Title:", item.title);
+    if (!title) return;
+    const subject = prompt("Subject:", item.subject);
+    if (!subject) return;
+    const classLevel = prompt("Class (8th, 9th, 10th, 11th, 12th, All):", item.class_level || "12th");
+    if (!classLevel) return;
+    const fileUrl = prompt("PDF URL:", item.file_url);
+    if (!fileUrl) return;
+
+    await queryDatabase(
+        "UPDATE study_materials SET title = $1, subject = $2, class_level = $3, file_url = $4 WHERE id = $5",
+        [title.trim(), subject.trim(), classLevel.trim(), fileUrl.trim(), id]
+    );
+    await renderAdminMaterialsManage();
+}
+
+async function deleteMaterialItem(id) {
+    if (!confirm("Delete this study material?")) return;
+    await queryDatabase("DELETE FROM study_materials WHERE id = $1", [id]);
+    await renderAdminMaterialsManage();
+}
+
+
 // ============================================================================
-// PART 2: QUIZ PORTAL, FULLSCREEN HEADER, PER-STUDENT ATTEMPTS & AUTO-RESULT
+// PART 2: QUIZ PORTAL, CACHED NAME + EDIT, FULLSCREEN & ATTEMPTS
 // ============================================================================
 
 async function loadQuizzesList() {
     const container = document.getElementById("quiz-list");
     if (!container) return;
 
+    const filterClassEl = document.getElementById("filter-class");
+    const selectedClass = getSelectedClass();
+    if (filterClassEl && selectedClass !== "All") {
+        filterClassEl.value = selectedClass;
+    }
+
     try {
-        allQuizzesCache = await queryDatabase("SELECT id, title, subject, html_url, created_at FROM quizzes ORDER BY created_at DESC");
-        renderQuizzes(allQuizzesCache);
+        allQuizzesCache = await queryDatabase("SELECT id, title, subject, class_level, html_url, created_at FROM quizzes ORDER BY created_at DESC");
+        filterQuizzes();
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load quizzes: ${escapeHtml(err.message)}</p>`;
     }
 }
 
 function filterQuizzes() {
+    const dropdownClass = document.getElementById("filter-class")?.value || "all";
+    const activeTopClass = getSelectedClass();
+    const effectiveClass = dropdownClass !== "all" ? dropdownClass : activeTopClass;
+
     const subjectFilter = document.getElementById("filter-subject")?.value || "all";
     const sortOrder = document.getElementById("filter-sort")?.value || "newest";
 
     let filtered = [...allQuizzesCache];
+
+    if (effectiveClass && effectiveClass.toLowerCase() !== "all") {
+        filtered = filtered.filter(q => {
+            const qClass = String(q.class_level || "All").toLowerCase();
+            return qClass === "all" || qClass === effectiveClass.toLowerCase();
+        });
+    }
 
     if (subjectFilter !== "all") {
         filtered = filtered.filter(q => String(q.subject).toLowerCase() === subjectFilter.toLowerCase());
@@ -361,10 +661,13 @@ function renderQuizzes(quizzes) {
         const shareLink = getQuizShareLink(q.id);
 
         return `
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col justify-between space-y-4">
+            <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
                 <div>
                     <div class="flex justify-between items-center gap-2">
-                        <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(q.subject)}</span>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(q.class_level || "All")}</span>
+                            <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(q.subject)}</span>
+                        </div>
                         <span class="text-[11px] text-gray-400">${escapeHtml(postedDate)}</span>
                     </div>
                     <h3 class="text-lg font-bold mt-2">${escapeHtml(q.title)}</h3>
@@ -419,6 +722,17 @@ function updateAttemptHeaderUI() {
     if (totalAttemptsEl) totalAttemptsEl.textContent = String(currentActiveQuizSession.totalAttemptsSoFar);
 }
 
+function enableCachedNameEdit() {
+    const displayWrap = document.getElementById("cached-name-display");
+    const editWrap = document.getElementById("cached-name-edit");
+    const editInput = document.getElementById("quiz-start-student-name");
+    if (displayWrap) displayWrap.classList.add("hidden");
+    if (editWrap) editWrap.classList.remove("hidden");
+    if (editInput) {
+        editInput.focus();
+    }
+}
+
 async function openQuizById(quizId) {
     cleanupQuizTimers();
     const portal = document.getElementById("quiz-portal-container");
@@ -442,12 +756,16 @@ async function openQuizById(quizId) {
         );
         const attemptsCount = existingResults ? existingResults.length : 0;
         const shareUrl = getQuizShareLink(quiz.id);
+        const cachedName = getCachedStudentName();
 
         portal.innerHTML = `
             <div class="space-y-6">
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
+                <div class="glass-card p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
                     <div>
-                        <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(quiz.class_level || "All")}</span>
+                            <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
+                        </div>
                         <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
                         <p class="text-xs text-gray-400 mt-1">Total Attempts: <span class="text-blue-300 font-semibold">${attemptsCount}</span></p>
                         <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -458,13 +776,25 @@ async function openQuizById(quizId) {
                     <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
                 </div>
 
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-4 max-w-xl mx-auto">
-                    <h3 class="text-lg font-bold text-blue-300">Enter Your Details to Begin</h3>
-                    <p class="text-xs text-gray-400">Enter your name below. The quiz will start in fullscreen with your attempt count, seconds, and timer in the top bar.</p>
-                    <input type="text" id="quiz-start-student-name" placeholder="Enter Your Full Name" required
-                           class="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
+                <div class="glass-card p-8 rounded-3xl space-y-4 max-w-xl mx-auto">
+                    <h3 class="text-lg font-bold text-blue-300">Ready to Start</h3>
+
+                    <div id="cached-name-display" class="${cachedName ? "" : "hidden"} bg-white/5 border border-white/10 p-4 rounded-2xl flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-[11px] text-gray-400">Saved Student Name</p>
+                            <p id="saved-name-label" class="text-sm font-bold text-white">${escapeHtml(cachedName)}</p>
+                        </div>
+                        <button type="button" onclick="enableCachedNameEdit()" class="text-xs bg-white/10 hover:bg-white/20 text-blue-300 px-3.5 py-1.5 rounded-xl transition">✏️ Edit</button>
+                    </div>
+
+                    <div id="cached-name-edit" class="${cachedName ? "hidden" : ""} space-y-2">
+                        <label for="quiz-start-student-name" class="block text-xs text-gray-300">Student Full Name</label>
+                        <input type="text" id="quiz-start-student-name" value="${escapeHtml(cachedName)}" placeholder="Enter Your Full Name"
+                               class="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+
                     <button type="button" id="start-fullscreen-quiz-btn"
-                            class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl text-sm font-semibold transition shadow-lg shadow-blue-600/30">
+                            class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white py-3.5 rounded-2xl text-sm font-semibold transition shadow-lg shadow-blue-600/30">
                         Start Quiz in Fullscreen →
                     </button>
                 </div>
@@ -476,13 +806,18 @@ async function openQuizById(quizId) {
         await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
 
         document.getElementById("start-fullscreen-quiz-btn")?.addEventListener("click", async () => {
-            const nameInput = document.getElementById("quiz-start-student-name");
-            const studentName = (nameInput?.value || "").trim();
+            const editBox = document.getElementById("cached-name-edit");
+            const isEditing = editBox && !editBox.classList.contains("hidden");
+            const inputName = (document.getElementById("quiz-start-student-name")?.value || "").trim();
+            const studentName = isEditing ? inputName : (getCachedStudentName() || inputName);
+
             if (!studentName) {
                 alert("Please enter your full name before starting the quiz.");
-                nameInput?.focus();
+                enableCachedNameEdit();
                 return;
             }
+
+            setCachedStudentName(studentName);
             await launchFullscreenQuizStage(quiz, studentName, attemptsCount);
         });
     } catch (err) {
@@ -512,16 +847,21 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
     };
 
     portal.innerHTML = `
-        <div id="quiz-fullscreen-stage" class="bg-[#060A12] border border-white/15 rounded-3xl overflow-hidden flex flex-col min-h-screen">
-            <div class="sticky top-0 z-30 bg-[#0b1120]/95 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <p class="text-xs text-gray-400">
-                        Student: <span class="text-white font-semibold">${escapeHtml(studentName)}</span>
-                        <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                            Attempt #<span id="header-student-attempt">${nextStudentAttempt}</span>
-                        </span>
-                    </p>
-                    <h3 class="text-sm font-bold text-blue-400 truncate max-w-xs sm:max-w-md">${escapeHtml(quiz.title)}</h3>
+        <div id="quiz-fullscreen-stage" class="bg-[#060A12] border border-white/15 rounded-3xl overflow-hidden flex flex-col min-h-screen shadow-2xl">
+            <div class="sticky top-0 z-30 bg-[#070d1a]/95 backdrop-blur-2xl border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-300 font-bold text-xs shrink-0">
+                        #${nextStudentAttempt}
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-xs text-gray-300 truncate">
+                            <span class="font-semibold text-white">${escapeHtml(studentName)}</span>
+                            <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-blue-500/15 text-blue-300 border border-blue-500/25">
+                                Attempt #<span id="header-student-attempt">${nextStudentAttempt}</span>
+                            </span>
+                        </p>
+                        <h3 class="text-sm font-bold text-blue-400 truncate">${escapeHtml(quiz.title)}</h3>
+                    </div>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -529,18 +869,18 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
                         ⏱️ Time: <span id="header-time-mmss" class="font-bold text-blue-300">00:00</span>
                     </div>
                     <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
-                        ⏳ Seconds: <span id="header-seconds-count" class="font-bold text-green-300">0s</span>
+                        ⏳ Seconds: <span id="header-seconds-count" class="font-bold text-emerald-300">0s</span>
                     </div>
                     <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
-                        📊 Total Attempts: <span id="header-attempts-count" class="font-bold text-yellow-300">${totalAttemptsSoFar}</span>
+                        📊 Attempts: <span id="header-attempts-count" class="font-bold text-amber-300">${totalAttemptsSoFar}</span>
                     </div>
-                    <button type="button" onclick="exitQuizFullscreenAndReturn()" class="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl transition">
+                    <button type="button" onclick="exitQuizFullscreenAndReturn()" class="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-200 px-3 py-1.5 rounded-xl transition font-medium">
                         Exit
                     </button>
                 </div>
             </div>
 
-            <iframe id="uploaded-quiz-frame" class="w-full flex-grow min-h-[75vh] border-0 bg-[#060A12]"></iframe>
+            <iframe id="uploaded-quiz-frame" class="w-full flex-grow min-h-[78vh] border-0 bg-[#060A12]"></iframe>
         </div>
 
         <div id="quiz-attempts-beneath" class="mt-6"></div>
@@ -577,7 +917,6 @@ function startWatchingIframeCompletion(iframe) {
             const text = (doc.body.innerText || "").trim();
             const isCompletedScreen = Boolean(text && /Quiz Complete!/i.test(text));
 
-            // If student already completed this run and then reset/restarted inside the HTML quiz
             if (currentActiveQuizSession.recordedForCurrentRun && !isCompletedScreen) {
                 currentActiveQuizSession.recordedForCurrentRun = false;
                 currentActiveQuizSession.attemptNumber += 1;
@@ -588,12 +927,10 @@ function startWatchingIframeCompletion(iframe) {
 
             if (!isCompletedScreen || currentActiveQuizSession.recordedForCurrentRun) return;
 
-            // Parse score like "2 / 8" or "2/8"
             const scoreMatch = text.match(/(\d+)\s*\/\s*(\d+)/);
             const marks = scoreMatch ? Number(scoreMatch[1]) : 0;
             const totalMarks = scoreMatch ? Number(scoreMatch[2]) : 0;
 
-            // Parse time like "0m 9s" or "1m 25s" if displayed inside HTML, otherwise fallback to timer
             let finalSeconds = secondsElapsed;
             const timeMatch = text.match(/Time:\s*(?:(\d+)m\s*)?(\d+)s/i);
             if (timeMatch) {
@@ -648,7 +985,7 @@ async function renderAttemptsTable(quizId, targetElementId) {
 
         if (!results || results.length === 0) {
             target.innerHTML = `
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex justify-between items-center text-xs text-gray-400">
+                <div class="glass-card p-6 rounded-3xl flex justify-between items-center text-xs text-gray-400">
                     <span>No attempts recorded for this quiz yet.</span>
                     <span>Total Attempts: 0</span>
                 </div>
@@ -666,7 +1003,7 @@ async function renderAttemptsTable(quizId, targetElementId) {
         });
 
         target.innerHTML = `
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
+            <div class="glass-card p-6 rounded-3xl space-y-4">
                 <div class="flex justify-between items-center">
                     <h3 class="text-base font-bold text-blue-300">🏆 Attempts & Results</h3>
                     <span class="text-xs text-gray-400">Total Attempts: ${results.length}</span>
