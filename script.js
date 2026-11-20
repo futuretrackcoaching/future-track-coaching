@@ -6,6 +6,8 @@ let slideshowInterval = null;
 let allQuizzesCache = [];
 let activeQuizTimer = null;
 let secondsElapsed = 0;
+let quizWatcherInterval = null;
+let currentActiveQuizSession = null;
 
 function tryStartApp() {
     if (domLoaded && neonLoaded) {
@@ -29,12 +31,21 @@ window.addEventListener("hashchange", () => {
     }
 });
 
-// Dynamically load pages from 'pages/' into #app
-async function loadPage(pageName) {
+function cleanupQuizTimers() {
     if (activeQuizTimer) {
         clearInterval(activeQuizTimer);
         activeQuizTimer = null;
     }
+    if (quizWatcherInterval) {
+        clearInterval(quizWatcherInterval);
+        quizWatcherInterval = null;
+    }
+    currentActiveQuizSession = null;
+}
+
+// Dynamically load pages from 'pages/' into #app
+async function loadPage(pageName) {
+    cleanupQuizTimers();
     if (slideshowInterval) {
         clearInterval(slideshowInterval);
         slideshowInterval = null;
@@ -253,7 +264,6 @@ async function handleCreateQuiz(e) {
     }
 }
 
-// Upload a standalone .html quiz file from admin's device and store in Neon
 async function handleUploadHtmlQuiz(e) {
     e.preventDefault();
     const title = document.getElementById("html-quiz-title").value.trim();
@@ -295,7 +305,7 @@ async function handleUploadHtmlQuiz(e) {
 }
 
 
-// --- QUIZ PORTAL, FILTERS, UPLOADED HTML QUIZZES & ATTEMPTS ---
+// --- QUIZ PORTAL, NAME GATE, FULLSCREEN & AUTO-RESULT SCRAPER ---
 
 async function loadQuizzesList() {
     const container = document.getElementById("quiz-list");
@@ -370,7 +380,7 @@ function renderQuizzes(quizzes) {
                     <p class="text-[11px] text-gray-400 mt-1 break-all">Link: <span class="text-blue-300">${escapeHtml(shareLink)}</span></p>
                 </div>
                 <div class="flex gap-2">
-                    <button type="button" onclick="openQuizById(${Number(q.id)})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex-1">Open Quiz & Attempts</button>
+                    <button type="button" onclick="openQuizById(${Number(q.id)})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex-1">Open Quiz & Results</button>
                     <button type="button" onclick="copyQuizLink('${escapeHtml(shareLink)}')" class="bg-white/10 hover:bg-white/20 text-gray-200 text-xs font-medium py-2.5 px-3 rounded-xl transition">Copy</button>
                 </div>
             </div>
@@ -378,38 +388,8 @@ function renderQuizzes(quizzes) {
     }).join("");
 }
 
-function injectPortalBridge(rawHtml, quizId) {
-    const bridgeScript = `
-        <script>
-            window.FT_QUIZ_ID = ${Number(quizId)};
-            window.ftStartTime = Date.now();
-
-            window.submitToFutureTrack = function(studentName, marks, totalMarks, customSeconds) {
-                const elapsed = typeof customSeconds === "number" && customSeconds >= 0
-                    ? Math.round(customSeconds)
-                    : Math.max(1, Math.round((Date.now() - window.ftStartTime) / 1000));
-
-                window.parent.postMessage({
-                    type: "FT_QUIZ_RESULT",
-                    quizId: window.FT_QUIZ_ID,
-                    studentName: String(studentName || "").trim(),
-                    marks: Number(marks || 0),
-                    totalMarks: Number(totalMarks || 0),
-                    timeTakenSeconds: elapsed
-                }, "*");
-            };
-
-            window.sendResultToPortal = window.submitToFutureTrack;
-        <\/script>
-    `;
-
-    if (/<\/head>/i.test(rawHtml)) {
-        return rawHtml.replace(/<\/head>/i, `${bridgeScript}</head>`);
-    }
-    return bridgeScript + rawHtml;
-}
-
 async function openQuizById(quizId) {
+    cleanupQuizTimers();
     const portal = document.getElementById("quiz-portal-container");
     if (!portal) return;
 
@@ -425,187 +405,209 @@ async function openQuizById(quizId) {
             return;
         }
 
-        // If quiz has uploaded HTML content or external HTML URL, render embedded HTML quiz view
-        if (quiz.html_content || quiz.html_url) {
-            await renderUploadedHtmlQuizView(quiz);
-        } else {
-            await openBuiltInQuiz(quiz);
-        }
+        const existingResults = await queryDatabase(
+            "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC, submitted_at DESC",
+            [quiz.id]
+        );
+        const attemptsCount = existingResults ? existingResults.length : 0;
+        const shareUrl = getQuizShareLink(quiz.id);
+
+        // Step 1: Student enters their name first, then starts in fullscreen
+        portal.innerHTML = `
+            <div class="space-y-6">
+                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
+                    <div>
+                        <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
+                        <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
+                        <p class="text-xs text-gray-400 mt-1">Total Attempts: <span class="text-blue-300 font-semibold">${attemptsCount}</span></p>
+                        <div class="flex flex-wrap items-center gap-2 mt-2">
+                            <code class="text-xs text-blue-300 bg-white/5 px-2.5 py-1 rounded-lg break-all">${escapeHtml(shareUrl)}</code>
+                            <button type="button" onclick="copyQuizLink('${escapeHtml(shareUrl)}')" class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 px-3 py-1 rounded-lg border border-blue-500/30 transition">Copy Link</button>
+                        </div>
+                    </div>
+                    <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+                </div>
+
+                <!-- Student Name Gate Before Fullscreen Launch -->
+                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-4 max-w-xl mx-auto">
+                    <h3 class="text-lg font-bold text-blue-300">Enter Your Details to Begin</h3>
+                    <p class="text-xs text-gray-400">Enter your name below. The quiz will open in fullscreen with a live timer and attempts counter at the top.</p>
+                    <input type="text" id="quiz-start-student-name" placeholder="Enter Your Full Name" required
+                           class="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
+                    <button type="button" id="start-fullscreen-quiz-btn"
+                            class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl text-sm font-semibold transition shadow-lg shadow-blue-600/30">
+                        Start Quiz in Fullscreen →
+                    </button>
+                </div>
+
+                <!-- Results & Attempts Visible to All Students -->
+                <div id="quiz-attempts-beneath"></div>
+            </div>
+        `;
+
+        await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
+
+        document.getElementById("start-fullscreen-quiz-btn")?.addEventListener("click", async () => {
+            const nameInput = document.getElementById("quiz-start-student-name");
+            const studentName = (nameInput?.value || "").trim();
+            if (!studentName) {
+                alert("Please enter your full name before starting the quiz.");
+                nameInput?.focus();
+                return;
+            }
+            await launchFullscreenQuizStage(quiz, studentName, attemptsCount);
+        });
     } catch (err) {
         portal.innerHTML = `<p class="text-red-400 text-sm text-center py-8">Error loading quiz: ${escapeHtml(err.message)}</p>`;
     }
 }
 
-async function renderUploadedHtmlQuizView(quiz) {
+async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
+    cleanupQuizTimers();
     const portal = document.getElementById("quiz-portal-container");
     if (!portal) return;
 
-    const shareUrl = getQuizShareLink(quiz.id);
+    secondsElapsed = 0;
+    currentActiveQuizSession = {
+        quizId: Number(quiz.id),
+        quizTitle: quiz.title,
+        studentName,
+        attemptsCount,
+        recorded: false
+    };
 
     portal.innerHTML = `
-        <div class="space-y-6">
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
+        <div id="quiz-fullscreen-stage" class="bg-[#060A12] border border-white/15 rounded-3xl overflow-hidden flex flex-col min-h-screen">
+            <!-- Top Quiz Header: Seconds, Attempts & Time -->
+            <div class="sticky top-0 z-30 bg-[#0b1120]/95 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
-                    <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
-                    <div class="flex flex-wrap items-center gap-2 mt-2">
-                        <code class="text-xs text-blue-300 bg-white/5 px-2.5 py-1 rounded-lg break-all">${escapeHtml(shareUrl)}</code>
-                        <button type="button" onclick="copyQuizLink('${escapeHtml(shareUrl)}')" class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 px-3 py-1 rounded-lg border border-blue-500/30 transition">Copy Link</button>
-                    </div>
+                    <p class="text-xs text-gray-400">Student: <span class="text-white font-semibold">${escapeHtml(studentName)}</span></p>
+                    <h3 class="text-sm font-bold text-blue-400 truncate max-w-xs sm:max-w-md">${escapeHtml(quiz.title)}</h3>
                 </div>
-                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+                        ⏱️ Time: <span id="header-time-mmss" class="font-bold text-blue-300">00:00</span>
+                    </div>
+                    <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+                        ⏳ Seconds: <span id="header-seconds-count" class="font-bold text-green-300">0s</span>
+                    </div>
+                    <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+                        📊 Attempts: <span id="header-attempts-count" class="font-bold text-yellow-300">${attemptsCount}</span>
+                    </div>
+                    <button type="button" onclick="exitQuizFullscreenAndReturn()" class="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl transition">
+                        Exit
+                    </button>
+                </div>
             </div>
 
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
-                <iframe id="uploaded-quiz-frame" class="w-full min-h-[620px] border-0 bg-[#060A12]"></iframe>
-            </div>
-
-            <div id="quiz-attempts-beneath"></div>
+            <!-- Untouched Third-Party HTML Quiz Frame -->
+            <iframe id="uploaded-quiz-frame" class="w-full flex-grow min-h-[75vh] border-0 bg-[#060A12]"></iframe>
         </div>
+
+        <div id="quiz-attempts-beneath" class="mt-6"></div>
     `;
+
+    const stageEl = document.getElementById("quiz-fullscreen-stage");
+    if (stageEl && stageEl.requestFullscreen) {
+        try {
+            await stageEl.requestFullscreen();
+        } catch (_) {
+            // Continue smoothly if browser blocks automatic fullscreen
+        }
+    }
+
+    // Live timer updating both Time (MM:SS) and Seconds
+    activeQuizTimer = setInterval(() => {
+        secondsElapsed++;
+        const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, "0");
+        const secs = String(secondsElapsed % 60).padStart(2, "0");
+        const mmssEl = document.getElementById("header-time-mmss");
+        const secEl = document.getElementById("header-seconds-count");
+        if (mmssEl) mmssEl.textContent = `${mins}:${secs}`;
+        if (secEl) secEl.textContent = `${secondsElapsed}s`;
+    }, 1000);
 
     const iframe = document.getElementById("uploaded-quiz-frame");
     if (quiz.html_content) {
-        iframe.srcdoc = injectPortalBridge(quiz.html_content, quiz.id);
+        iframe.srcdoc = quiz.html_content;
     } else if (quiz.html_url) {
-        iframe.src = `${quiz.html_url}${quiz.html_url.includes("?") ? "&" : "?"}quizId=${quiz.id}`;
+        iframe.src = quiz.html_url;
     }
 
     await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
+    startWatchingIframeCompletion(iframe);
 }
 
-async function openBuiltInQuiz(quiz) {
-    const portal = document.getElementById("quiz-portal-container");
-    if (!portal) return;
+function startWatchingIframeCompletion(iframe) {
+    quizWatcherInterval = setInterval(async () => {
+        if (!currentActiveQuizSession || currentActiveQuizSession.recorded) return;
 
-    const shareUrl = getQuizShareLink(quiz.id);
-    secondsElapsed = 0;
+        try {
+            const doc = iframe?.contentDocument || iframe?.contentWindow?.document;
+            if (!doc || !doc.body) return;
 
-    portal.innerHTML = `
-        <div class="space-y-6">
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-6">
-                <div class="flex flex-wrap justify-between items-center gap-3 border-b border-white/10 pb-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-blue-400">${escapeHtml(quiz.title)}</h2>
-                        <p class="text-[11px] text-gray-400 mt-1 break-all">Link: <span class="text-blue-300">${escapeHtml(shareUrl)}</span></p>
-                    </div>
-                    <div class="text-sm bg-blue-500/10 text-blue-300 px-4 py-1.5 rounded-xl border border-blue-500/20">
-                        ⏱️ Time Taken: <span id="timer-display">00:00</span>
-                    </div>
-                </div>
+            const text = (doc.body.innerText || "").trim();
+            if (!text || !/Quiz Complete!/i.test(text)) return;
 
-                <div id="quiz-questions-box" class="space-y-6">
-                    <p class="text-gray-400 text-sm">Loading questions...</p>
-                </div>
+            // Parse score like "2 / 8" or "2/8"
+            const scoreMatch = text.match(/(\d+)\s*\/\s*(\d+)/);
+            const marks = scoreMatch ? Number(scoreMatch[1]) : 0;
+            const totalMarks = scoreMatch ? Number(scoreMatch[2]) : 0;
 
-                <div class="space-y-3 pt-4 border-t border-white/10">
-                    <input type="text" id="student-name" placeholder="Enter Your Full Name" class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500" required>
-                    <button type="button" onclick="submitBuiltInQuiz(${Number(quiz.id)})" class="bg-green-600 hover:bg-green-500 text-white w-full py-3 rounded-2xl font-medium transition shadow-lg shadow-green-600/30">Submit Quiz & View Attempts</button>
-                </div>
-                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="text-xs text-gray-400 hover:underline">← Back to Quiz List</button>
-            </div>
+            // Parse time like "0m 9s" or "1m 25s" if shown inside HTML, otherwise fallback to timer
+            let finalSeconds = secondsElapsed;
+            const timeMatch = text.match(/Time:\s*(?:(\d+)m\s*)?(\d+)s/i);
+            if (timeMatch) {
+                const mins = Number(timeMatch[1] || 0);
+                const secs = Number(timeMatch[2] || 0);
+                finalSeconds = mins * 60 + secs;
+            }
 
-            <div id="quiz-attempts-beneath"></div>
-        </div>
-    `;
+            currentActiveQuizSession.recorded = true;
+            if (activeQuizTimer) {
+                clearInterval(activeQuizTimer);
+                activeQuizTimer = null;
+            }
+            if (quizWatcherInterval) {
+                clearInterval(quizWatcherInterval);
+                quizWatcherInterval = null;
+            }
 
-    activeQuizTimer = setInterval(() => {
-        secondsElapsed++;
-        const mins = Math.floor(secondsElapsed / 60).toString().padStart(2, "0");
-        const secs = (secondsElapsed % 60).toString().padStart(2, "0");
-        const timerEl = document.getElementById("timer-display");
-        if (timerEl) timerEl.innerText = `${mins}:${secs}`;
-    }, 1000);
+            const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
+            const { quizId, studentName } = currentActiveQuizSession;
 
-    try {
-        const questions = await queryDatabase("SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY id ASC", [quiz.id]);
-        const qBox = document.getElementById("quiz-questions-box");
-        qBox.dataset.questions = JSON.stringify(questions);
+            await queryDatabase(
+                "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
+                [quizId, studentName, marks, totalMarks, percentage, finalSeconds]
+            );
 
-        if (!questions || questions.length === 0) {
-            qBox.innerHTML = `<p class="text-gray-400 text-sm">No questions added to this quiz yet.</p>`;
-        } else {
-            qBox.innerHTML = questions.map((q, idx) => `
-                <div class="bg-white/5 border border-white/10 p-5 rounded-2xl space-y-3">
-                    <p class="font-medium text-sm">Q${idx + 1}. ${escapeHtml(q.question_text)}</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                        <label class="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/10"><input type="radio" name="q_${q.id}" value="A"> A) ${escapeHtml(q.option_a)}</label>
-                        <label class="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/10"><input type="radio" name="q_${q.id}" value="B"> B) ${escapeHtml(q.option_b)}</label>
-                        <label class="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/10"><input type="radio" name="q_${q.id}" value="C"> C) ${escapeHtml(q.option_c)}</label>
-                        <label class="flex items-center gap-2 bg-white/5 p-3 rounded-xl border border-white/5 cursor-pointer hover:bg-white/10"><input type="radio" name="q_${q.id}" value="D"> D) ${escapeHtml(q.option_d)}</label>
-                    </div>
-                </div>
-            `).join("");
+            if (document.fullscreenElement && document.exitFullscreen) {
+                try {
+                    await document.exitFullscreen();
+                } catch (_) {}
+            }
+
+            await renderAttemptsTable(quizId, "quiz-attempts-beneath");
+            const newAttemptCount = currentActiveQuizSession.attemptsCount + 1;
+            const attemptsBadge = document.getElementById("header-attempts-count");
+            if (attemptsBadge) attemptsBadge.textContent = String(newAttemptCount);
+        } catch (err) {
+            console.error("Error reading/saving quiz completion:", err);
         }
-
-        await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
-    } catch (err) {
-        document.getElementById("quiz-questions-box").innerHTML = `<p class="text-red-400 text-sm">Error loading questions.</p>`;
-    }
+    }, 600);
 }
 
-async function submitBuiltInQuiz(quizId) {
-    const studentName = document.getElementById("student-name")?.value.trim();
-    if (!studentName) {
-        alert("Please enter your name before submitting.");
-        return;
+async function exitQuizFullscreenAndReturn() {
+    if (document.fullscreenElement && document.exitFullscreen) {
+        try {
+            await document.exitFullscreen();
+        } catch (_) {}
     }
-
-    if (activeQuizTimer) {
-        clearInterval(activeQuizTimer);
-        activeQuizTimer = null;
-    }
-
-    const qBox = document.getElementById("quiz-questions-box");
-    const questions = JSON.parse(qBox.dataset.questions || "[]");
-    let score = 0;
-
-    questions.forEach(q => {
-        const selected = document.querySelector(`input[name="q_${q.id}"]:checked`);
-        if (selected && selected.value === q.correct_option) {
-            score++;
-        }
-    });
-
-    const total = questions.length;
-    const percentage = total > 0 ? Number(((score / total) * 100).toFixed(2)) : 0;
-
-    try {
-        await queryDatabase(
-            "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
-            [quizId, studentName, score, total, percentage, secondsElapsed]
-        );
-        alert(`Submitted! Score: ${score}/${total} (${percentage.toFixed(1)}%)`);
-        await renderAttemptsTable(quizId, "quiz-attempts-beneath");
-    } catch (err) {
-        alert("Error submitting quiz result: " + err.message);
-    }
+    cleanupQuizTimers();
+    history.replaceState(null, "", "#quiz");
+    await loadPage("quiz");
 }
-
-// Listen for results submitted from any embedded/uploaded HTML quiz
-window.addEventListener("message", async (event) => {
-    const data = event.data;
-    if (!data || data.type !== "FT_QUIZ_RESULT") return;
-
-    const quizId = Number(data.quizId);
-    const studentName = String(data.studentName || "").trim();
-    const marks = Number(data.marks || 0);
-    const totalMarks = Number(data.totalMarks || 0);
-    const timeTakenSeconds = Math.max(0, Number(data.timeTakenSeconds || 0));
-    const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
-
-    if (!quizId || !studentName) return;
-
-    try {
-        await queryDatabase(
-            "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
-            [quizId, studentName, marks, totalMarks, percentage, timeTakenSeconds]
-        );
-        await renderAttemptsTable(quizId, "quiz-attempts-beneath");
-    } catch (err) {
-        console.error("Failed to record uploaded HTML quiz result:", err);
-    }
-});
 
 async function renderAttemptsTable(quizId, targetElementId) {
     const target = document.getElementById(targetElementId);
