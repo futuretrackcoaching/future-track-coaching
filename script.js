@@ -82,24 +82,11 @@ async function handleRoute() {
         }
 
         try {
-            const res = await queryDatabase("SELECT pin_code FROM admin_settings LIMIT 1");
-            if (!res || res.length === 0) {
-                alert("Admin PIN not configured in database. Run the admin_settings SQL setup first.");
-                history.replaceState(null, "", "#home");
-                loadPage("home");
-                return;
-            }
-
-            if (enteredPin.trim() === String(res[0].pin_code).trim()) {
-                loadPage("admin");
-            } else {
-                alert("Incorrect PIN");
-                history.replaceState(null, "", "#home");
-                loadPage("home");
-            }
+            await verifyAdminPinOnServer(enteredPin);
+            loadPage("admin");
         } catch (err) {
-            console.error("Database error checking admin PIN:", err);
-            alert("Database Error: " + (err && err.message ? err.message : "Could not connect to Neon."));
+            setSessionAdminPin("");
+            alert(err && err.message ? err.message : "Incorrect PIN");
             history.replaceState(null, "", "#home");
             loadPage("home");
         }
@@ -107,6 +94,7 @@ async function handleRoute() {
         loadPage("home");
     }
 }
+
 
 
 // --- HOME SLIDESHOW (5 SECONDS) ---
