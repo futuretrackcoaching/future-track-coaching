@@ -1,4 +1,6 @@
-// --- INITIALIZATION & ROUTER ---
+// ============================================================================
+// PART 1: ROUTER, PAGE LOADER, SLIDESHOW, VAULT/TESTS & ADMIN HANDLERS
+// ============================================================================
 
 let domLoaded = false;
 let neonLoaded = Boolean(window.neon);
@@ -43,7 +45,6 @@ function cleanupQuizTimers() {
     currentActiveQuizSession = null;
 }
 
-// Dynamically load pages from 'pages/' into #app
 async function loadPage(pageName) {
     cleanupQuizTimers();
     if (slideshowInterval) {
@@ -80,7 +81,6 @@ async function loadPage(pageName) {
     }
 }
 
-// Check URL hash for #ftadmin, #quiz-<id>, or default page
 async function handleRoute() {
     const hash = window.location.hash;
 
@@ -114,9 +114,6 @@ async function handleRoute() {
     }
 }
 
-
-// --- HOME SLIDESHOW (5 SECONDS) ---
-
 function initSlideshow() {
     let currentSlide = 0;
     const slides = document.querySelectorAll(".slide");
@@ -140,9 +137,6 @@ function initSlideshow() {
         }
     }, 5000);
 }
-
-
-// --- STUDY VAULT & TEST SERIES LOADERS ---
 
 async function loadMaterialsList() {
     const container = document.getElementById("materials-list");
@@ -195,9 +189,6 @@ async function loadTestsList() {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load test schedule: ${escapeHtml(err.message)}</p>`;
     }
 }
-
-
-// --- ADMIN PORTAL HANDLERS ---
 
 async function handlePostMaterial(e) {
     e.preventDefault();
@@ -303,9 +294,9 @@ async function handleUploadHtmlQuiz(e) {
         }
     }
 }
-
-
-// --- QUIZ PORTAL, NAME GATE, FULLSCREEN & AUTO-RESULT SCRAPER ---
+// ============================================================================
+// PART 2: QUIZ PORTAL, FULLSCREEN HEADER, PER-STUDENT ATTEMPTS & AUTO-RESULT
+// ============================================================================
 
 async function loadQuizzesList() {
     const container = document.getElementById("quiz-list");
@@ -388,6 +379,46 @@ function renderQuizzes(quizzes) {
     }).join("");
 }
 
+function getStudentAttemptNumber(resultsList, studentName) {
+    const cleanName = String(studentName || "").trim().toLowerCase();
+    if (!cleanName || !Array.isArray(resultsList)) return 1;
+    const priorAttempts = resultsList.filter(
+        r => String(r.student_name || "").trim().toLowerCase() === cleanName
+    ).length;
+    return priorAttempts + 1;
+}
+
+function startLiveQuizClock() {
+    if (activeQuizTimer) {
+        clearInterval(activeQuizTimer);
+        activeQuizTimer = null;
+    }
+    secondsElapsed = 0;
+    updateClockHeaderUI();
+
+    activeQuizTimer = setInterval(() => {
+        secondsElapsed++;
+        updateClockHeaderUI();
+    }, 1000);
+}
+
+function updateClockHeaderUI() {
+    const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, "0");
+    const secs = String(secondsElapsed % 60).padStart(2, "0");
+    const mmssEl = document.getElementById("header-time-mmss");
+    const secEl = document.getElementById("header-seconds-count");
+    if (mmssEl) mmssEl.textContent = `${mins}:${secs}`;
+    if (secEl) secEl.textContent = `${secondsElapsed}s`;
+}
+
+function updateAttemptHeaderUI() {
+    if (!currentActiveQuizSession) return;
+    const studentAttemptEl = document.getElementById("header-student-attempt");
+    const totalAttemptsEl = document.getElementById("header-attempts-count");
+    if (studentAttemptEl) studentAttemptEl.textContent = String(currentActiveQuizSession.attemptNumber);
+    if (totalAttemptsEl) totalAttemptsEl.textContent = String(currentActiveQuizSession.totalAttemptsSoFar);
+}
+
 async function openQuizById(quizId) {
     cleanupQuizTimers();
     const portal = document.getElementById("quiz-portal-container");
@@ -406,13 +437,12 @@ async function openQuizById(quizId) {
         }
 
         const existingResults = await queryDatabase(
-            "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC, submitted_at DESC",
+            "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY submitted_at ASC, id ASC",
             [quiz.id]
         );
         const attemptsCount = existingResults ? existingResults.length : 0;
         const shareUrl = getQuizShareLink(quiz.id);
 
-        // Step 1: Student enters their name first, then starts in fullscreen
         portal.innerHTML = `
             <div class="space-y-6">
                 <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
@@ -428,10 +458,9 @@ async function openQuizById(quizId) {
                     <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
                 </div>
 
-                <!-- Student Name Gate Before Fullscreen Launch -->
                 <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-4 max-w-xl mx-auto">
                     <h3 class="text-lg font-bold text-blue-300">Enter Your Details to Begin</h3>
-                    <p class="text-xs text-gray-400">Enter your name below. The quiz will open in fullscreen with a live timer and attempts counter at the top.</p>
+                    <p class="text-xs text-gray-400">Enter your name below. The quiz will start in fullscreen with your attempt count, seconds, and timer in the top bar.</p>
                     <input type="text" id="quiz-start-student-name" placeholder="Enter Your Full Name" required
                            class="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
                     <button type="button" id="start-fullscreen-quiz-btn"
@@ -440,7 +469,6 @@ async function openQuizById(quizId) {
                     </button>
                 </div>
 
-                <!-- Results & Attempts Visible to All Students -->
                 <div id="quiz-attempts-beneath"></div>
             </div>
         `;
@@ -467,21 +495,32 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
     const portal = document.getElementById("quiz-portal-container");
     if (!portal) return;
 
-    secondsElapsed = 0;
+    const existingResults = await queryDatabase(
+        "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY submitted_at ASC, id ASC",
+        [quiz.id]
+    );
+    const totalAttemptsSoFar = existingResults ? existingResults.length : attemptsCount;
+    const nextStudentAttempt = getStudentAttemptNumber(existingResults, studentName);
+
     currentActiveQuizSession = {
         quizId: Number(quiz.id),
         quizTitle: quiz.title,
         studentName,
-        attemptsCount,
-        recorded: false
+        attemptNumber: nextStudentAttempt,
+        totalAttemptsSoFar,
+        recordedForCurrentRun: false
     };
 
     portal.innerHTML = `
         <div id="quiz-fullscreen-stage" class="bg-[#060A12] border border-white/15 rounded-3xl overflow-hidden flex flex-col min-h-screen">
-            <!-- Top Quiz Header: Seconds, Attempts & Time -->
             <div class="sticky top-0 z-30 bg-[#0b1120]/95 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <p class="text-xs text-gray-400">Student: <span class="text-white font-semibold">${escapeHtml(studentName)}</span></p>
+                    <p class="text-xs text-gray-400">
+                        Student: <span class="text-white font-semibold">${escapeHtml(studentName)}</span>
+                        <span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            Attempt #<span id="header-student-attempt">${nextStudentAttempt}</span>
+                        </span>
+                    </p>
                     <h3 class="text-sm font-bold text-blue-400 truncate max-w-xs sm:max-w-md">${escapeHtml(quiz.title)}</h3>
                 </div>
 
@@ -493,7 +532,7 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
                         ⏳ Seconds: <span id="header-seconds-count" class="font-bold text-green-300">0s</span>
                     </div>
                     <div class="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
-                        📊 Attempts: <span id="header-attempts-count" class="font-bold text-yellow-300">${attemptsCount}</span>
+                        📊 Total Attempts: <span id="header-attempts-count" class="font-bold text-yellow-300">${totalAttemptsSoFar}</span>
                     </div>
                     <button type="button" onclick="exitQuizFullscreenAndReturn()" class="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl transition">
                         Exit
@@ -501,7 +540,6 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
                 </div>
             </div>
 
-            <!-- Untouched Third-Party HTML Quiz Frame -->
             <iframe id="uploaded-quiz-frame" class="w-full flex-grow min-h-[75vh] border-0 bg-[#060A12]"></iframe>
         </div>
 
@@ -512,21 +550,10 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
     if (stageEl && stageEl.requestFullscreen) {
         try {
             await stageEl.requestFullscreen();
-        } catch (_) {
-            // Continue smoothly if browser blocks automatic fullscreen
-        }
+        } catch (_) {}
     }
 
-    // Live timer updating both Time (MM:SS) and Seconds
-    activeQuizTimer = setInterval(() => {
-        secondsElapsed++;
-        const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, "0");
-        const secs = String(secondsElapsed % 60).padStart(2, "0");
-        const mmssEl = document.getElementById("header-time-mmss");
-        const secEl = document.getElementById("header-seconds-count");
-        if (mmssEl) mmssEl.textContent = `${mins}:${secs}`;
-        if (secEl) secEl.textContent = `${secondsElapsed}s`;
-    }, 1000);
+    startLiveQuizClock();
 
     const iframe = document.getElementById("uploaded-quiz-frame");
     if (quiz.html_content) {
@@ -541,21 +568,32 @@ async function launchFullscreenQuizStage(quiz, studentName, attemptsCount) {
 
 function startWatchingIframeCompletion(iframe) {
     quizWatcherInterval = setInterval(async () => {
-        if (!currentActiveQuizSession || currentActiveQuizSession.recorded) return;
+        if (!currentActiveQuizSession) return;
 
         try {
             const doc = iframe?.contentDocument || iframe?.contentWindow?.document;
             if (!doc || !doc.body) return;
 
             const text = (doc.body.innerText || "").trim();
-            if (!text || !/Quiz Complete!/i.test(text)) return;
+            const isCompletedScreen = Boolean(text && /Quiz Complete!/i.test(text));
+
+            // If student already completed this run and then reset/restarted inside the HTML quiz
+            if (currentActiveQuizSession.recordedForCurrentRun && !isCompletedScreen) {
+                currentActiveQuizSession.recordedForCurrentRun = false;
+                currentActiveQuizSession.attemptNumber += 1;
+                updateAttemptHeaderUI();
+                startLiveQuizClock();
+                return;
+            }
+
+            if (!isCompletedScreen || currentActiveQuizSession.recordedForCurrentRun) return;
 
             // Parse score like "2 / 8" or "2/8"
             const scoreMatch = text.match(/(\d+)\s*\/\s*(\d+)/);
             const marks = scoreMatch ? Number(scoreMatch[1]) : 0;
             const totalMarks = scoreMatch ? Number(scoreMatch[2]) : 0;
 
-            // Parse time like "0m 9s" or "1m 25s" if shown inside HTML, otherwise fallback to timer
+            // Parse time like "0m 9s" or "1m 25s" if displayed inside HTML, otherwise fallback to timer
             let finalSeconds = secondsElapsed;
             const timeMatch = text.match(/Time:\s*(?:(\d+)m\s*)?(\d+)s/i);
             if (timeMatch) {
@@ -564,14 +602,10 @@ function startWatchingIframeCompletion(iframe) {
                 finalSeconds = mins * 60 + secs;
             }
 
-            currentActiveQuizSession.recorded = true;
+            currentActiveQuizSession.recordedForCurrentRun = true;
             if (activeQuizTimer) {
                 clearInterval(activeQuizTimer);
                 activeQuizTimer = null;
-            }
-            if (quizWatcherInterval) {
-                clearInterval(quizWatcherInterval);
-                quizWatcherInterval = null;
             }
 
             const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
@@ -582,20 +616,13 @@ function startWatchingIframeCompletion(iframe) {
                 [quizId, studentName, marks, totalMarks, percentage, finalSeconds]
             );
 
-            if (document.fullscreenElement && document.exitFullscreen) {
-                try {
-                    await document.exitFullscreen();
-                } catch (_) {}
-            }
-
+            currentActiveQuizSession.totalAttemptsSoFar += 1;
+            updateAttemptHeaderUI();
             await renderAttemptsTable(quizId, "quiz-attempts-beneath");
-            const newAttemptCount = currentActiveQuizSession.attemptsCount + 1;
-            const attemptsBadge = document.getElementById("header-attempts-count");
-            if (attemptsBadge) attemptsBadge.textContent = String(newAttemptCount);
         } catch (err) {
             console.error("Error reading/saving quiz completion:", err);
         }
-    }, 600);
+    }, 500);
 }
 
 async function exitQuizFullscreenAndReturn() {
@@ -629,6 +656,15 @@ async function renderAttemptsTable(quizId, targetElementId) {
             return;
         }
 
+        const chronological = [...results].sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at) || a.id - b.id);
+        const studentCounter = {};
+        const attemptNumberById = {};
+        chronological.forEach(r => {
+            const key = String(r.student_name || "").trim().toLowerCase();
+            studentCounter[key] = (studentCounter[key] || 0) + 1;
+            attemptNumberById[r.id] = studentCounter[key];
+        });
+
         target.innerHTML = `
             <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
                 <div class="flex justify-between items-center">
@@ -641,6 +677,7 @@ async function renderAttemptsTable(quizId, targetElementId) {
                             <tr class="border-b border-white/10 text-gray-400">
                                 <th class="pb-3">Rank</th>
                                 <th class="pb-3">Student Name</th>
+                                <th class="pb-3">Attempt</th>
                                 <th class="pb-3">Score</th>
                                 <th class="pb-3">Percentage</th>
                                 <th class="pb-3">Time Taken</th>
@@ -651,6 +688,7 @@ async function renderAttemptsTable(quizId, targetElementId) {
                                 <tr class="${idx === 0 ? "text-yellow-400 font-bold" : ""}">
                                     <td class="py-3">#${idx + 1}</td>
                                     <td class="py-3">${escapeHtml(r.student_name)}</td>
+                                    <td class="py-3">Attempt #${attemptNumberById[r.id] || 1}</td>
                                     <td class="py-3">${escapeHtml(r.marks)} / ${escapeHtml(r.total_marks)}</td>
                                     <td class="py-3">${Number(r.percentage).toFixed(1)}%</td>
                                     <td class="py-3">${Math.floor(Number(r.time_taken_seconds) / 60)}m ${Number(r.time_taken_seconds) % 60}s</td>
