@@ -487,3 +487,141 @@ function escapeHtml(value) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 }
+async function handleAddHtmlQuiz(e) {
+    e.preventDefault();
+    const title = document.getElementById("html-quiz-title").value.trim();
+    const subject = document.getElementById("html-quiz-subject").value.trim();
+    const htmlUrl = document.getElementById("html-quiz-url").value.trim();
+
+    try {
+        await queryDatabase(
+            "INSERT INTO quizzes (title, subject, html_url) VALUES ($1, $2, $3)",
+            [title, subject, htmlUrl]
+        );
+        alert("HTML Quiz added successfully!");
+        document.getElementById("html-quiz-form").reset();
+    } catch (err) {
+        alert("Error adding HTML quiz: " + err.message);
+    }
+}
+
+function getQuizShareLink(quizId) {
+    const base = `${window.location.origin}${window.location.pathname}`;
+    return `${base}#quiz-${quizId}`;
+}
+
+async function openHtmlQuizView(quizId) {
+    const portal = document.getElementById("quiz-portal-container");
+    if (!portal) return;
+
+    const quizzes = await queryDatabase("SELECT * FROM quizzes WHERE id = $1", [quizId]);
+    const quiz = quizzes && quizzes[0];
+    if (!quiz) {
+        portal.innerHTML = `<p class="text-red-400 text-sm">Quiz not found.</p>`;
+        return;
+    }
+
+    const shareUrl = getQuizShareLink(quiz.id);
+    const frameSrc = quiz.html_url
+        ? `${quiz.html_url}${quiz.html_url.includes("?") ? "&" : "?"}quizId=${quiz.id}`
+        : "";
+
+    portal.innerHTML = `
+        <div class="space-y-6">
+            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
+                    <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
+                    <p class="text-xs text-gray-400 mt-1 break-all">Quiz Link: <a href="${escapeHtml(shareUrl)}" class="text-blue-400 hover:underline">${escapeHtml(shareUrl)}</a></p>
+                </div>
+                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+            </div>
+
+            ${frameSrc ? `
+                <div class="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-xl">
+                    <iframe src="${escapeHtml(frameSrc)}" class="w-full min-h-[560px] border-0 bg-white" loading="lazy"></iframe>
+                </div>
+            ` : `
+                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl text-xs text-gray-400">
+                    No HTML file URL attached to this quiz yet.
+                </div>
+            `}
+
+            <div id="quiz-attempts-beneath"></div>
+        </div>
+    `;
+
+    await renderAttemptsBeneathQuiz(quiz.id, "quiz-attempts-beneath");
+}
+
+async function renderAttemptsBeneathQuiz(quizId, targetId) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+
+    const results = await queryDatabase(
+        "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC",
+        [quizId]
+    );
+
+    target.innerHTML = `
+        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-base font-bold text-blue-300">📊 Attempts & Results</h3>
+                <span class="text-xs text-gray-400">Total Attempts: ${results.length}</span>
+            </div>
+            ${results.length === 0 ? `
+                <p class="text-xs text-gray-400">No attempts yet for this quiz.</p>
+            ` : `
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead>
+                            <tr class="border-b border-white/10 text-gray-400">
+                                <th class="pb-3">Rank</th>
+                                <th class="pb-3">Student</th>
+                                <th class="pb-3">Score</th>
+                                <th class="pb-3">Percentage</th>
+                                <th class="pb-3">Time Taken</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-white/5">
+                            ${results.map((r, i) => `
+                                <tr class="${i === 0 ? "text-yellow-400 font-bold" : ""}">
+                                    <td class="py-3">#${i + 1}</td>
+                                    <td class="py-3">${escapeHtml(r.student_name)}</td>
+                                    <td class="py-3">${r.marks} / ${r.total_marks}</td>
+                                    <td class="py-3">${Number(r.percentage).toFixed(1)}%</td>
+                                    <td class="py-3">${Math.floor(r.time_taken_seconds / 60)}m ${r.time_taken_seconds % 60}s</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            `}
+        </div>
+    `;
+}
+
+// Receive score + time from inside any uploaded HTML quiz file
+window.addEventListener("message", async (event) => {
+    const data = event.data;
+    if (!data || data.type !== "FT_QUIZ_RESULT") return;
+
+    const quizId = Number(data.quizId);
+    const studentName = String(data.studentName || "").trim();
+    const marks = Number(data.marks || 0);
+    const totalMarks = Number(data.totalMarks || 0);
+    const timeTakenSeconds = Number(data.timeTakenSeconds || 0);
+    const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
+
+    if (!quizId || !studentName) return;
+
+    try {
+        await queryDatabase(
+            "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
+            [quizId, studentName, marks, totalMarks, percentage, timeTakenSeconds]
+        );
+        await renderAttemptsBeneathQuiz(quizId, "quiz-attempts-beneath");
+    } catch (err) {
+        console.error("Failed to save HTML quiz result:", err);
+    }
+});
