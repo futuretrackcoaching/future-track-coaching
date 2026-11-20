@@ -56,15 +56,17 @@
             <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-2xl text-sm font-medium transition shadow-lg shadow-blue-600/30">Save Quiz & Question</button>
         </form>
     </div>
-<!-- Add Standalone HTML Quiz -->
+<!-- Upload Standalone HTML Quiz File -->
 <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
-    <h2 class="text-lg font-bold">🌐 Add HTML Quiz File</h2>
-    <form id="html-quiz-form" onsubmit="handleAddHtmlQuiz(event)" class="space-y-3">
-        <input type="text" id="html-quiz-title" placeholder="Quiz Title (e.g., Partnership Quiz 1)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
+    <h2 class="text-lg font-bold">📤 Upload HTML Quiz File</h2>
+    <p class="text-xs text-gray-400">Select any .html quiz file from your device. It will be stored in the database and given its own shareable link.</p>
+    <form id="html-quiz-form" onsubmit="handleUploadHtmlQuiz(event)" class="space-y-3">
+        <input type="text" id="html-quiz-title" placeholder="Quiz Title (e.g., Partnership Accounts Test 1)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
         <input type="text" id="html-quiz-subject" placeholder="Subject (e.g., Accountancy)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
-        <input type="text" id="html-quiz-url" placeholder="HTML File Path or URL (e.g., quizzes/quiz1.html)" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500">
-        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-2xl text-sm font-medium transition shadow-lg shadow-blue-600/30">Save HTML Quiz</button>
+        <input type="file" id="html-quiz-file" accept=".html,.htm,text/html" required class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500">
+        <button type="submit" id="upload-quiz-btn" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-2xl text-sm font-medium transition shadow-lg shadow-blue-600/30">Upload & Publish Quiz</button>
     </form>
 </div>
+
 
 </div>
