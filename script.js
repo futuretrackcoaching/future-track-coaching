@@ -49,52 +49,59 @@ async function loadPage(pageName) {
         document.getElementById("app").innerHTML = htmlContent;
         window.scrollTo({ top: 0, behavior: "smooth" });
 
-        // Initialize page-specific features after HTML injection
         if (pageName === "home") {
             initSlideshow();
         } else if (pageName === "quiz") {
-            loadQuizzesList();
+            await loadQuizzesList();
         } else if (pageName === "material") {
-            loadMaterialsList();
+            await loadMaterialsList();
         } else if (pageName === "test") {
-            loadTestsList();
+            await loadTestsList();
         }
     } catch (error) {
         console.error("Error loading page:", error);
         document.getElementById("app").innerHTML = `
             <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl text-center max-w-lg mx-auto mt-12 shadow-2xl">
                 <h2 class="text-xl font-bold text-red-400 mb-2">Page Not Found</h2>
-                <p class="text-gray-400 text-sm">Could not load <code class="text-blue-300">pages/${pageName}.html</code>.</p>
+                <p class="text-gray-400 text-sm">Could not load <code class="text-blue-300">pages/${escapeHtml(pageName)}.html</code>.</p>
             </div>
         `;
     }
 }
 
-// Check URL hash for secret admin access (#ftadmin) verified against Neon DB
+// Check URL hash for #ftadmin, #quiz-<id>, or default page
 async function handleRoute() {
     const hash = window.location.hash;
+
     if (hash === "#ftadmin") {
         const enteredPin = prompt("Enter Admin Secret PIN:");
         if (!enteredPin) {
             history.replaceState(null, "", "#home");
-            loadPage("home");
+            await loadPage("home");
             return;
         }
 
         try {
             await verifyAdminPinOnServer(enteredPin);
-            loadPage("admin");
+            await loadPage("admin");
         } catch (err) {
-            setSessionAdminPin("");
+            if (typeof setSessionAdminPin === "function") {
+                setSessionAdminPin("");
+            }
             alert(err && err.message ? err.message : "Incorrect PIN");
             history.replaceState(null, "", "#home");
-            loadPage("home");
+            await loadPage("home");
+        }
+    } else if (hash && hash.startsWith("#quiz-")) {
+        const quizId = Number(hash.replace("#quiz-", ""));
+        await loadPage("quiz");
+        if (quizId) {
+            await openQuizById(quizId);
         }
     } else {
-        loadPage("home");
+        await loadPage("home");
     }
 }
-
 
 
 // --- HOME SLIDESHOW (5 SECONDS) ---
@@ -132,7 +139,7 @@ async function loadMaterialsList() {
 
     try {
         const materials = await queryDatabase("SELECT * FROM study_materials ORDER BY uploaded_at DESC");
-        if (materials.length === 0) {
+        if (!materials || materials.length === 0) {
             container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No study materials uploaded yet.</p>`;
             return;
         }
@@ -146,7 +153,7 @@ async function loadMaterialsList() {
             </div>
         `).join("");
     } catch (err) {
-        container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load materials.</p>`;
+        container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load materials: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -156,7 +163,7 @@ async function loadTestsList() {
 
     try {
         const tests = await queryDatabase("SELECT * FROM test_timetables ORDER BY test_date ASC");
-        if (tests.length === 0) {
+        if (!tests || tests.length === 0) {
             container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No upcoming tests scheduled yet.</p>`;
             return;
         }
@@ -166,7 +173,7 @@ async function loadTestsList() {
                 <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-2">
                     <div class="flex justify-between items-center">
                         <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(t.subject)}</span>
-                        <span class="text-xs text-gray-400">📅 ${formattedDate}</span>
+                        <span class="text-xs text-gray-400">📅 ${escapeHtml(formattedDate)}</span>
                     </div>
                     <h3 class="text-lg font-bold pt-1">${escapeHtml(t.test_name)}</h3>
                     <p class="text-xs text-gray-300">${escapeHtml(t.syllabus)}</p>
@@ -174,10 +181,9 @@ async function loadTestsList() {
             `;
         }).join("");
     } catch (err) {
-        container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load test schedule.</p>`;
+        container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load test schedule: ${escapeHtml(err.message)}</p>`;
     }
 }
-
 
 
 // --- ADMIN PORTAL HANDLERS ---
@@ -247,15 +253,56 @@ async function handleCreateQuiz(e) {
     }
 }
 
+// Upload a standalone .html quiz file from admin's device and store in Neon
+async function handleUploadHtmlQuiz(e) {
+    e.preventDefault();
+    const title = document.getElementById("html-quiz-title").value.trim();
+    const subject = document.getElementById("html-quiz-subject").value.trim();
+    const fileInput = document.getElementById("html-quiz-file");
+    const btn = document.getElementById("upload-quiz-btn");
 
-// --- QUIZ PORTAL, FILTERS, TIMER & RANKINGS ---
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        alert("Please select an .html quiz file first.");
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const originalBtnText = btn ? btn.textContent : "Upload & Publish Quiz";
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+    }
+
+    try {
+        const htmlContent = await file.text();
+        const res = await queryDatabase(
+            "INSERT INTO quizzes (title, subject, html_content) VALUES ($1, $2, $3) RETURNING id",
+            [title, subject, htmlContent]
+        );
+        const newId = res[0].id;
+        const shareLink = `${window.location.origin}${window.location.pathname}#quiz-${newId}`;
+
+        alert(`Quiz uploaded successfully!\n\nShareable Link:\n${shareLink}`);
+        document.getElementById("html-quiz-form").reset();
+    } catch (err) {
+        alert("Error uploading HTML quiz: " + err.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalBtnText;
+        }
+    }
+}
+
+
+// --- QUIZ PORTAL, FILTERS, UPLOADED HTML QUIZZES & ATTEMPTS ---
 
 async function loadQuizzesList() {
     const container = document.getElementById("quiz-list");
     if (!container) return;
 
     try {
-        allQuizzesCache = await queryDatabase("SELECT * FROM quizzes ORDER BY created_at DESC");
+        allQuizzesCache = await queryDatabase("SELECT id, title, subject, html_url, created_at FROM quizzes ORDER BY created_at DESC");
         renderQuizzes(allQuizzesCache);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load quizzes: ${escapeHtml(err.message)}</p>`;
@@ -269,7 +316,7 @@ function filterQuizzes() {
     let filtered = [...allQuizzesCache];
 
     if (subjectFilter !== "all") {
-        filtered = filtered.filter(q => q.subject.toLowerCase() === subjectFilter.toLowerCase());
+        filtered = filtered.filter(q => String(q.subject).toLowerCase() === subjectFilter.toLowerCase());
     }
 
     filtered.sort((a, b) => {
@@ -281,11 +328,27 @@ function filterQuizzes() {
     renderQuizzes(filtered);
 }
 
+function getQuizShareLink(quizId) {
+    return `${window.location.origin}${window.location.pathname}#quiz-${quizId}`;
+}
+
+function copyQuizLink(link) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(() => {
+            alert("Quiz link copied:\n" + link);
+        }).catch(() => {
+            prompt("Copy quiz link:", link);
+        });
+    } else {
+        prompt("Copy quiz link:", link);
+    }
+}
+
 function renderQuizzes(quizzes) {
     const container = document.getElementById("quiz-list");
     if (!container) return;
 
-    if (quizzes.length === 0) {
+    if (!quizzes || quizzes.length === 0) {
         container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No quizzes found matching your filter.</p>`;
         return;
     }
@@ -294,48 +357,156 @@ function renderQuizzes(quizzes) {
         const postedDate = q.created_at
             ? new Date(q.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
             : "";
+        const shareLink = getQuizShareLink(q.id);
+
         return `
             <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-col justify-between space-y-4">
                 <div>
-                    <div class="flex justify-between items-center">
+                    <div class="flex justify-between items-center gap-2">
                         <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(q.subject)}</span>
-                        <span class="text-[11px] text-gray-400">${postedDate}</span>
+                        <span class="text-[11px] text-gray-400">${escapeHtml(postedDate)}</span>
                     </div>
                     <h3 class="text-lg font-bold mt-2">${escapeHtml(q.title)}</h3>
+                    <p class="text-[11px] text-gray-400 mt-1 break-all">Link: <span class="text-blue-300">${escapeHtml(shareLink)}</span></p>
                 </div>
-                <button type="button" onclick="openQuiz(${q.id})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 w-full">Start Quiz & View Rankings</button>
+                <div class="flex gap-2">
+                    <button type="button" onclick="openQuizById(${Number(q.id)})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex-1">Open Quiz & Attempts</button>
+                    <button type="button" onclick="copyQuizLink('${escapeHtml(shareLink)}')" class="bg-white/10 hover:bg-white/20 text-gray-200 text-xs font-medium py-2.5 px-3 rounded-xl transition">Copy</button>
+                </div>
             </div>
         `;
     }).join("");
 }
 
-async function openQuiz(quizId) {
+function injectPortalBridge(rawHtml, quizId) {
+    const bridgeScript = `
+        <script>
+            window.FT_QUIZ_ID = ${Number(quizId)};
+            window.ftStartTime = Date.now();
+
+            window.submitToFutureTrack = function(studentName, marks, totalMarks, customSeconds) {
+                const elapsed = typeof customSeconds === "number" && customSeconds >= 0
+                    ? Math.round(customSeconds)
+                    : Math.max(1, Math.round((Date.now() - window.ftStartTime) / 1000));
+
+                window.parent.postMessage({
+                    type: "FT_QUIZ_RESULT",
+                    quizId: window.FT_QUIZ_ID,
+                    studentName: String(studentName || "").trim(),
+                    marks: Number(marks || 0),
+                    totalMarks: Number(totalMarks || 0),
+                    timeTakenSeconds: elapsed
+                }, "*");
+            };
+
+            window.sendResultToPortal = window.submitToFutureTrack;
+        <\/script>
+    `;
+
+    if (/<\/head>/i.test(rawHtml)) {
+        return rawHtml.replace(/<\/head>/i, `${bridgeScript}</head>`);
+    }
+    return bridgeScript + rawHtml;
+}
+
+async function openQuizById(quizId) {
     const portal = document.getElementById("quiz-portal-container");
-    const quizObj = allQuizzesCache.find(q => q.id === quizId);
-    const quizTitle = quizObj ? quizObj.title : "Quiz";
+    if (!portal) return;
+
+    history.replaceState(null, "", `#quiz-${quizId}`);
+    portal.innerHTML = `<p class="text-gray-400 text-sm text-center py-8">Loading quiz...</p>`;
+
+    try {
+        const rows = await queryDatabase("SELECT * FROM quizzes WHERE id = $1", [quizId]);
+        const quiz = rows && rows[0];
+
+        if (!quiz) {
+            portal.innerHTML = `<p class="text-red-400 text-sm text-center py-8">Quiz not found.</p>`;
+            return;
+        }
+
+        // If quiz has uploaded HTML content or external HTML URL, render embedded HTML quiz view
+        if (quiz.html_content || quiz.html_url) {
+            await renderUploadedHtmlQuizView(quiz);
+        } else {
+            await openBuiltInQuiz(quiz);
+        }
+    } catch (err) {
+        portal.innerHTML = `<p class="text-red-400 text-sm text-center py-8">Error loading quiz: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function renderUploadedHtmlQuizView(quiz) {
+    const portal = document.getElementById("quiz-portal-container");
+    if (!portal) return;
+
+    const shareUrl = getQuizShareLink(quiz.id);
+
+    portal.innerHTML = `
+        <div class="space-y-6">
+            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-4">
+                <div>
+                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
+                    <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
+                    <div class="flex flex-wrap items-center gap-2 mt-2">
+                        <code class="text-xs text-blue-300 bg-white/5 px-2.5 py-1 rounded-lg break-all">${escapeHtml(shareUrl)}</code>
+                        <button type="button" onclick="copyQuizLink('${escapeHtml(shareUrl)}')" class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 px-3 py-1 rounded-lg border border-blue-500/30 transition">Copy Link</button>
+                    </div>
+                </div>
+                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+            </div>
+
+            <div class="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+                <iframe id="uploaded-quiz-frame" class="w-full min-h-[620px] border-0 bg-[#060A12]"></iframe>
+            </div>
+
+            <div id="quiz-attempts-beneath"></div>
+        </div>
+    `;
+
+    const iframe = document.getElementById("uploaded-quiz-frame");
+    if (quiz.html_content) {
+        iframe.srcdoc = injectPortalBridge(quiz.html_content, quiz.id);
+    } else if (quiz.html_url) {
+        iframe.src = `${quiz.html_url}${quiz.html_url.includes("?") ? "&" : "?"}quizId=${quiz.id}`;
+    }
+
+    await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
+}
+
+async function openBuiltInQuiz(quiz) {
+    const portal = document.getElementById("quiz-portal-container");
+    if (!portal) return;
+
+    const shareUrl = getQuizShareLink(quiz.id);
     secondsElapsed = 0;
 
     portal.innerHTML = `
-        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-6">
-            <div class="flex flex-wrap justify-between items-center gap-3 border-b border-white/10 pb-4">
-                <h2 class="text-xl font-bold text-blue-400">${escapeHtml(quizTitle)}</h2>
-                <div class="text-sm bg-blue-500/10 text-blue-300 px-4 py-1.5 rounded-xl border border-blue-500/20">
-                    ⏱️ Time Taken: <span id="timer-display">00:00</span>
+        <div class="space-y-6">
+            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-6">
+                <div class="flex flex-wrap justify-between items-center gap-3 border-b border-white/10 pb-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-blue-400">${escapeHtml(quiz.title)}</h2>
+                        <p class="text-[11px] text-gray-400 mt-1 break-all">Link: <span class="text-blue-300">${escapeHtml(shareUrl)}</span></p>
+                    </div>
+                    <div class="text-sm bg-blue-500/10 text-blue-300 px-4 py-1.5 rounded-xl border border-blue-500/20">
+                        ⏱️ Time Taken: <span id="timer-display">00:00</span>
+                    </div>
                 </div>
+
+                <div id="quiz-questions-box" class="space-y-6">
+                    <p class="text-gray-400 text-sm">Loading questions...</p>
+                </div>
+
+                <div class="space-y-3 pt-4 border-t border-white/10">
+                    <input type="text" id="student-name" placeholder="Enter Your Full Name" class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500" required>
+                    <button type="button" onclick="submitBuiltInQuiz(${Number(quiz.id)})" class="bg-green-600 hover:bg-green-500 text-white w-full py-3 rounded-2xl font-medium transition shadow-lg shadow-green-600/30">Submit Quiz & View Attempts</button>
+                </div>
+                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="text-xs text-gray-400 hover:underline">← Back to Quiz List</button>
             </div>
 
-            <div id="quiz-questions-box" class="space-y-6">
-                <p class="text-gray-400 text-sm">Loading questions...</p>
-            </div>
-
-            <div class="space-y-3 pt-4 border-t border-white/10">
-                <input type="text" id="student-name" placeholder="Enter Your Full Name" class="w-full bg-white/5 border border-white/10 p-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500" required>
-                <button type="button" onclick="submitQuiz(${quizId})" class="bg-green-600 hover:bg-green-500 text-white w-full py-3 rounded-2xl font-medium transition shadow-lg shadow-green-600/30">Submit Quiz & View Ranking</button>
-            </div>
-            <button type="button" onclick="loadPage('quiz')" class="text-xs text-gray-400 hover:underline">← Back to Quiz List</button>
+            <div id="quiz-attempts-beneath"></div>
         </div>
-
-        <div id="quiz-leaderboard-box" class="mt-6"></div>
     `;
 
     activeQuizTimer = setInterval(() => {
@@ -347,11 +518,11 @@ async function openQuiz(quizId) {
     }, 1000);
 
     try {
-        const questions = await queryDatabase("SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY id ASC", [quizId]);
+        const questions = await queryDatabase("SELECT * FROM quiz_questions WHERE quiz_id = $1 ORDER BY id ASC", [quiz.id]);
         const qBox = document.getElementById("quiz-questions-box");
         qBox.dataset.questions = JSON.stringify(questions);
 
-        if (questions.length === 0) {
+        if (!questions || questions.length === 0) {
             qBox.innerHTML = `<p class="text-gray-400 text-sm">No questions added to this quiz yet.</p>`;
         } else {
             qBox.innerHTML = questions.map((q, idx) => `
@@ -367,15 +538,14 @@ async function openQuiz(quizId) {
             `).join("");
         }
 
-        // Also show existing results under the quiz
-        renderLeaderboardTable(quizId, "quiz-leaderboard-box");
+        await renderAttemptsTable(quiz.id, "quiz-attempts-beneath");
     } catch (err) {
         document.getElementById("quiz-questions-box").innerHTML = `<p class="text-red-400 text-sm">Error loading questions.</p>`;
     }
 }
 
-async function submitQuiz(quizId) {
-    const studentName = document.getElementById("student-name").value.trim();
+async function submitBuiltInQuiz(quizId) {
+    const studentName = document.getElementById("student-name")?.value.trim();
     if (!studentName) {
         alert("Please enter your name before submitting.");
         return;
@@ -398,48 +568,60 @@ async function submitQuiz(quizId) {
     });
 
     const total = questions.length;
-    const percentage = total > 0 ? ((score / total) * 100).toFixed(2) : 0;
+    const percentage = total > 0 ? Number(((score / total) * 100).toFixed(2)) : 0;
 
     try {
         await queryDatabase(
             "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
             [quizId, studentName, score, total, percentage, secondsElapsed]
         );
-        loadQuizResultsView(quizId, score, total, percentage);
+        alert(`Submitted! Score: ${score}/${total} (${percentage.toFixed(1)}%)`);
+        await renderAttemptsTable(quizId, "quiz-attempts-beneath");
     } catch (err) {
         alert("Error submitting quiz result: " + err.message);
     }
 }
 
-async function loadQuizResultsView(quizId, score, total, percentage) {
-    const portal = document.getElementById("quiz-portal-container");
-    portal.innerHTML = `
-        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl space-y-6">
-            <div>
-                <h2 class="text-xl font-bold text-green-400">🎉 Quiz Submitted Successfully!</h2>
-                <p class="text-sm text-gray-200 mt-1">Your Score: <span class="font-bold text-blue-400">${score} / ${total}</span> (${Number(percentage).toFixed(1)}%)</p>
-            </div>
-            <div id="submitted-leaderboard"></div>
-            <button type="button" onclick="loadPage('quiz')" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-5 rounded-xl transition shadow-lg shadow-blue-600/30">Back to All Quizzes</button>
-        </div>
-    `;
-    await renderLeaderboardTable(quizId, "submitted-leaderboard");
-}
+// Listen for results submitted from any embedded/uploaded HTML quiz
+window.addEventListener("message", async (event) => {
+    const data = event.data;
+    if (!data || data.type !== "FT_QUIZ_RESULT") return;
 
-async function renderLeaderboardTable(quizId, targetElementId) {
+    const quizId = Number(data.quizId);
+    const studentName = String(data.studentName || "").trim();
+    const marks = Number(data.marks || 0);
+    const totalMarks = Number(data.totalMarks || 0);
+    const timeTakenSeconds = Math.max(0, Number(data.timeTakenSeconds || 0));
+    const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
+
+    if (!quizId || !studentName) return;
+
+    try {
+        await queryDatabase(
+            "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
+            [quizId, studentName, marks, totalMarks, percentage, timeTakenSeconds]
+        );
+        await renderAttemptsTable(quizId, "quiz-attempts-beneath");
+    } catch (err) {
+        console.error("Failed to record uploaded HTML quiz result:", err);
+    }
+});
+
+async function renderAttemptsTable(quizId, targetElementId) {
     const target = document.getElementById(targetElementId);
     if (!target) return;
 
     try {
         const results = await queryDatabase(
-            "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC",
+            "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC, submitted_at DESC",
             [quizId]
         );
 
-        if (results.length === 0) {
+        if (!results || results.length === 0) {
             target.innerHTML = `
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl text-xs text-gray-400">
-                    No attempts recorded for this quiz yet. Be the first on the leaderboard!
+                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex justify-between items-center text-xs text-gray-400">
+                    <span>No attempts recorded for this quiz yet.</span>
+                    <span>Total Attempts: 0</span>
                 </div>
             `;
             return;
@@ -447,14 +629,17 @@ async function renderLeaderboardTable(quizId, targetElementId) {
 
         target.innerHTML = `
             <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
-                <h3 class="text-base font-bold text-blue-300">🏆 Quiz Rankings & Results</h3>
+                <div class="flex justify-between items-center">
+                    <h3 class="text-base font-bold text-blue-300">🏆 Attempts & Results</h3>
+                    <span class="text-xs text-gray-400">Total Attempts: ${results.length}</span>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-xs">
                         <thead>
                             <tr class="border-b border-white/10 text-gray-400">
                                 <th class="pb-3">Rank</th>
                                 <th class="pb-3">Student Name</th>
-                                <th class="pb-3">Marks</th>
+                                <th class="pb-3">Score</th>
                                 <th class="pb-3">Percentage</th>
                                 <th class="pb-3">Time Taken</th>
                             </tr>
@@ -464,9 +649,9 @@ async function renderLeaderboardTable(quizId, targetElementId) {
                                 <tr class="${idx === 0 ? "text-yellow-400 font-bold" : ""}">
                                     <td class="py-3">#${idx + 1}</td>
                                     <td class="py-3">${escapeHtml(r.student_name)}</td>
-                                    <td class="py-3">${r.marks} / ${r.total_marks}</td>
+                                    <td class="py-3">${escapeHtml(r.marks)} / ${escapeHtml(r.total_marks)}</td>
                                     <td class="py-3">${Number(r.percentage).toFixed(1)}%</td>
-                                    <td class="py-3">${Math.floor(r.time_taken_seconds / 60)}m ${r.time_taken_seconds % 60}s</td>
+                                    <td class="py-3">${Math.floor(Number(r.time_taken_seconds) / 60)}m ${Number(r.time_taken_seconds) % 60}s</td>
                                 </tr>
                             `).join("")}
                         </tbody>
@@ -475,7 +660,7 @@ async function renderLeaderboardTable(quizId, targetElementId) {
             </div>
         `;
     } catch (err) {
-        target.innerHTML = `<p class="text-red-400 text-xs">Could not load rankings.</p>`;
+        target.innerHTML = `<p class="text-red-400 text-xs">Could not load attempts: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -487,158 +672,3 @@ function escapeHtml(value) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 }
-async function handleAddHtmlQuiz(e) {
-    e.preventDefault();
-    const title = document.getElementById("html-quiz-title").value.trim();
-    const subject = document.getElementById("html-quiz-subject").value.trim();
-    const htmlUrl = document.getElementById("html-quiz-url").value.trim();
-
-    try {
-        await queryDatabase(
-            "INSERT INTO quizzes (title, subject, html_url) VALUES ($1, $2, $3)",
-            [title, subject, htmlUrl]
-        );
-        alert("HTML Quiz added successfully!");
-        document.getElementById("html-quiz-form").reset();
-    } catch (err) {
-        alert("Error adding HTML quiz: " + err.message);
-    }
-}
-
-function getQuizShareLink(quizId) {
-    const base = `${window.location.origin}${window.location.pathname}`;
-    return `${base}#quiz-${quizId}`;
-}
-
-async function openHtmlQuizView(quizId) {
-    const portal = document.getElementById("quiz-portal-container");
-    if (!portal) return;
-
-    const quizzes = await queryDatabase("SELECT * FROM quizzes WHERE id = $1", [quizId]);
-    const quiz = quizzes && quizzes[0];
-    if (!quiz) {
-        portal.innerHTML = `<p class="text-red-400 text-sm">Quiz not found.</p>`;
-        return;
-    }
-
-    const shareUrl = getQuizShareLink(quiz.id);
-    const frameSrc = quiz.html_url
-        ? `${quiz.html_url}${quiz.html_url.includes("?") ? "&" : "?"}quizId=${quiz.id}`
-        : "";
-
-    portal.innerHTML = `
-        <div class="space-y-6">
-            <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl flex flex-wrap justify-between items-center gap-3">
-                <div>
-                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(quiz.subject)}</span>
-                    <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
-                    <p class="text-xs text-gray-400 mt-1 break-all">Quiz Link: <a href="${escapeHtml(shareUrl)}" class="text-blue-400 hover:underline">${escapeHtml(shareUrl)}</a></p>
-                </div>
-                <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
-            </div>
-
-            ${frameSrc ? `
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-xl">
-                    <iframe src="${escapeHtml(frameSrc)}" class="w-full min-h-[560px] border-0 bg-white" loading="lazy"></iframe>
-                </div>
-            ` : `
-                <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl text-xs text-gray-400">
-                    No HTML file URL attached to this quiz yet.
-                </div>
-            `}
-
-            <div id="quiz-attempts-beneath"></div>
-        </div>
-    `;
-
-    await renderAttemptsBeneathQuiz(quiz.id, "quiz-attempts-beneath");
-}
-
-async function renderAttemptsBeneathQuiz(quizId, targetId) {
-    const target = document.getElementById(targetId);
-    if (!target) return;
-
-    const results = await queryDatabase(
-        "SELECT * FROM quiz_results WHERE quiz_id = $1 ORDER BY marks DESC, time_taken_seconds ASC",
-        [quizId]
-    );
-
-    target.innerHTML = `
-        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-3xl space-y-4">
-            <div class="flex justify-between items-center">
-                <h3 class="text-base font-bold text-blue-300">📊 Attempts & Results</h3>
-                <span class="text-xs text-gray-400">Total Attempts: ${results.length}</span>
-            </div>
-            ${results.length === 0 ? `
-                <p class="text-xs text-gray-400">No attempts yet for this quiz.</p>
-            ` : `
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs">
-                        <thead>
-                            <tr class="border-b border-white/10 text-gray-400">
-                                <th class="pb-3">Rank</th>
-                                <th class="pb-3">Student</th>
-                                <th class="pb-3">Score</th>
-                                <th class="pb-3">Percentage</th>
-                                <th class="pb-3">Time Taken</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-white/5">
-                            ${results.map((r, i) => `
-                                <tr class="${i === 0 ? "text-yellow-400 font-bold" : ""}">
-                                    <td class="py-3">#${i + 1}</td>
-                                    <td class="py-3">${escapeHtml(r.student_name)}</td>
-                                    <td class="py-3">${r.marks} / ${r.total_marks}</td>
-                                    <td class="py-3">${Number(r.percentage).toFixed(1)}%</td>
-                                    <td class="py-3">${Math.floor(r.time_taken_seconds / 60)}m ${r.time_taken_seconds % 60}s</td>
-                                </tr>
-                            `).join("")}
-                        </tbody>
-                    </table>
-                </div>
-            `}
-        </div>
-    `;
-}
-
-// Receive score + time from inside any uploaded HTML quiz file
-window.addEventListener("message", async (event) => {
-    const data = event.data;
-    if (!data || data.type !== "FT_QUIZ_RESULT") return;
-
-    const quizId = Number(data.quizId);
-    const studentName = String(data.studentName || "").trim();
-    const marks = Number(data.marks || 0);
-    const totalMarks = Number(data.totalMarks || 0);
-    const timeTakenSeconds = Number(data.timeTakenSeconds || 0);
-    const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;
-
-    if (!quizId || !studentName) return;
-
-    try {
-        await queryDatabase(
-            "INSERT INTO quiz_results (quiz_id, student_name, marks, total_marks, percentage, time_taken_seconds) VALUES ($1, $2, $3, $4, $5, $6)",
-            [quizId, studentName, marks, totalMarks, percentage, timeTakenSeconds]
-        );
-        await renderAttemptsBeneathQuiz(quizId, "quiz-attempts-beneath");
-    } catch (err) {
-        console.error("Failed to save HTML quiz result:", err);
-    }
-});
-const params = new URLSearchParams(window.location.search);
-const quizId = Number(params.get("quizId"));
-
-function sendResultToPortal(studentName, marks, totalMarks, timeTakenSeconds) {
-    window.parent.postMessage({
-        type: "FT_QUIZ_RESULT",
-        quizId,
-        studentName,
-        marks,
-        totalMarks,
-        timeTakenSeconds
-    }, "*");
-}
-
-// Example: call this inside your quiz submit handler
-// sendResultToPortal("Riya Sharma", 8, 10, 145);
-
