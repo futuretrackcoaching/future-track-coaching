@@ -1,22 +1,27 @@
-// Safely resolve the Neon serverless client factory in the browser
-const neonClientFactory =
-    (window.neon && typeof window.neon.neon === "function" && window.neon.neon) ||
-    (typeof window.neon === "function" && window.neon) ||
-    (typeof neon === "function" && neon) ||
-    (window.neondatabaseServerless && typeof window.neondatabaseServerless.neon === "function" && window.neondatabaseServerless.neon) ||
-    null;
-
-// Connected to your Neon PostgreSQL database
 const DATABASE_URL = "postgresql://neondb_owner:npg_LLSyBcdu5Ya2@ep-sweet-hill-a10jgoip-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
 
-const sql = neonClientFactory ? neonClientFactory(DATABASE_URL) : null;
+let sqlClient = null;
+
+// Lazily initialize the Neon SQL client once window.neon is loaded by index.html
+function getSqlClient() {
+    if (sqlClient) return sqlClient;
+
+    const neonFactory =
+        (window.neon && typeof window.neon.neon === "function" && window.neon.neon) ||
+        (typeof window.neon === "function" && window.neon) ||
+        null;
+
+    if (neonFactory) {
+        sqlClient = neonFactory(DATABASE_URL);
+    }
+    return sqlClient;
+}
 
 // Helper function to run SQL queries anywhere in your app
 async function queryDatabase(queryText, params = []) {
+    const sql = getSqlClient();
     if (!sql) {
-        const err = new Error("Neon SQL client is not initialized. Check the @neondatabase/serverless script in index.html.");
-        console.error(err.message);
-        throw err;
+        throw new Error("Neon database driver is still loading. Please try again in a second.");
     }
 
     try {
