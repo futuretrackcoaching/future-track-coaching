@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Future Track Coaching | Portal</title>
-    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -15,12 +14,8 @@
                     }
                 }
             }
-        }
+        };
     </script>
-    <!-- Neon Serverless Driver CDN -->
-    <script src="https://unpkg.com/@neondatabase/serverless@latest/bundle.production.min.js"></script>
-    <!-- Database Configuration -->
-    <script src="db-config.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-darkBg text-white min-h-screen font-sans selection:bg-blue-500 selection:text-white flex flex-col justify-between">
@@ -35,30 +30,38 @@
                     <p class="text-xs text-gray-400">Subhash Nagar, New Delhi</p>
                 </div>
             </div>
-            
+
             <nav class="hidden md:flex gap-2">
-                <button onclick="loadPage('home')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Home</button>
-                <button onclick="loadPage('material')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Study Vault</button>
-                <button onclick="loadPage('quiz')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Quizzes</button>
-                <button onclick="loadPage('test')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Test Series</button>
+                <button type="button" onclick="loadPage('home')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Home</button>
+                <button type="button" onclick="loadPage('material')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Study Vault</button>
+                <button type="button" onclick="loadPage('quiz')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Quizzes</button>
+                <button type="button" onclick="loadPage('test')" class="px-4 py-2 rounded-xl text-sm font-medium hover:bg-white/5 transition">Test Series</button>
             </nav>
         </div>
     </header>
 
     <!-- Main Dynamic Content Container -->
     <main id="app" class="max-w-6xl mx-auto p-6 w-full flex-grow">
-        <!-- Sub-pages load dynamically here -->
+        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl text-center text-gray-400 text-sm">
+            Loading portal...
+        </div>
     </main>
 
     <!-- Mobile Navigation Bar -->
     <div class="md:hidden sticky bottom-0 backdrop-blur-2xl bg-[#060A12]/90 border-t border-white/10 p-3 flex justify-around z-50">
-        <button onclick="loadPage('home')" class="text-xs flex flex-col items-center gap-1 text-gray-300">🏠 Home</button>
-        <button onclick="loadPage('material')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📚 Vault</button>
-        <button onclick="loadPage('quiz')" class="text-xs flex flex-col items-center gap-1 text-gray-300">✍️ Quiz</button>
-        <button onclick="loadPage('test')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📅 Tests</button>
+        <button type="button" onclick="loadPage('home')" class="text-xs flex flex-col items-center gap-1 text-gray-300">🏠 Home</button>
+        <button type="button" onclick="loadPage('material')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📚 Vault</button>
+        <button type="button" onclick="loadPage('quiz')" class="text-xs flex flex-col items-center gap-1 text-gray-300">✍️ Quiz</button>
+        <button type="button" onclick="loadPage('test')" class="text-xs flex flex-col items-center gap-1 text-gray-300">📅 Tests</button>
     </div>
 
-    <!-- Script Router Link -->
+    <!-- Load Neon driver into window.neon before app scripts -->
+    <script type="module">
+        import { neon } from "https://esm.sh/@neondatabase/serverless@0.10.4";
+        window.neon = { neon };
+        window.dispatchEvent(new Event("neonReady"));
+    </script>
+    <script src="db-config.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
