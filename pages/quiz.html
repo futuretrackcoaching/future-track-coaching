@@ -1,10 +1,10 @@
-<!-- pages/quiz.html -->
 <div class="space-y-6 max-w-5xl mx-auto pb-14">
     <div class="glass-card p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
             <h1 class="text-2xl font-extrabold">Student Quiz Vault</h1>
-            <p class="text-xs text-gray-400 mt-1">Cached student profile, fullscreen mode, live timer, and public results.</p>
+            <p class="text-xs text-gray-400 mt-1">Fullscreen mode, live timer & attempt counter, and public results beneath every quiz.</p>
         </div>
+
         <div class="flex flex-wrap gap-2 w-full md:w-auto">
             <select id="filter-class" onchange="filterQuizzes()" class="bg-[#091020] border border-white/10 px-3.5 py-2.5 rounded-2xl text-xs text-gray-200 focus:outline-none">
                 <option value="all">All Classes</option>
@@ -20,6 +20,8 @@
                 <option value="Economics">Economics</option>
                 <option value="Business Studies">Business Studies</option>
                 <option value="Mathematics">Mathematics</option>
+                <option value="Science">Science</option>
+                <option value="SST">SST</option>
             </select>
             <select id="filter-sort" onchange="filterQuizzes()" class="bg-[#091020] border border-white/10 px-3.5 py-2.5 rounded-2xl text-xs text-gray-200 focus:outline-none">
                 <option value="newest">Newest First</option>
