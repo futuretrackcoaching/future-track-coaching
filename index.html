@@ -39,10 +39,11 @@
             </nav>
         </div>
     </header>
-    <!-- Class Selector Bar (8th to 12th + All) -->
+
+    <!-- Class Selector Bar (All & 8th to 12th) -->
     <div class="max-w-6xl mx-auto px-6 pt-4 w-full">
         <div class="glass-card rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-semibold text-blue-300 tracking-wide">🎓 Select Class:</span>
+            <span class="text-xs font-semibold text-blue-300 tracking-wide">🎓 Active Class:</span>
             <div id="class-selector-group" class="flex flex-wrap gap-1.5">
                 <button type="button" data-class="All" onclick="setActiveClass('All')" class="class-pill px-3 py-1 rounded-xl text-xs font-medium border border-white/10 text-gray-300 hover:bg-white/10 transition">All</button>
                 <button type="button" data-class="8th" onclick="setActiveClass('8th')" class="class-pill px-3 py-1 rounded-xl text-xs font-medium border border-white/10 text-gray-300 hover:bg-white/10 transition">8th</button>
@@ -54,10 +55,9 @@
         </div>
     </div>
 
-
     <!-- Main Dynamic Content Container -->
     <main id="app" class="max-w-6xl mx-auto p-6 w-full flex-grow">
-        <div class="bg-white/5 backdrop-blur-xl border border-white/10 p-8 rounded-3xl text-center text-gray-400 text-sm">
+        <div class="glass-card p-8 rounded-3xl text-center text-gray-400 text-sm">
             Loading portal...
         </div>
     </main>
