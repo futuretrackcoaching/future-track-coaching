@@ -1,5 +1,5 @@
 // ============================================================================
-// PART 1: CLASS STATE, STUDENT NAME CACHE, ROUTER & ADMIN CRUD
+// PART 1 OF 3: CLASS PROMPT, STATE, ROUTER, SLIDESHOW & VAULT/TESTS
 // ============================================================================
 
 let domLoaded = false;
@@ -14,6 +14,7 @@ let quizWatcherInterval = null;
 let currentActiveQuizSession = null;
 
 const CLASS_STORAGE_KEY = "ft_selected_class";
+const CLASS_PROMPT_SHOWN_KEY = "ft_class_prompt_shown";
 const STUDENT_NAME_STORAGE_KEY = "ft_cached_student_name";
 
 function getSelectedClass() {
@@ -21,17 +22,53 @@ function getSelectedClass() {
 }
 
 function setActiveClass(classValue) {
-    localStorage.setItem(CLASS_STORAGE_KEY, classValue || "All");
+    applyStudentClassSelection(classValue);
+}
+
+function applyStudentClassSelection(classValue) {
+    const validClasses = ["All", "8th", "9th", "10th", "11th", "12th"];
+    const chosen = validClasses.includes(classValue) ? classValue : "All";
+
+    localStorage.setItem(CLASS_STORAGE_KEY, chosen);
+    localStorage.setItem(CLASS_PROMPT_SHOWN_KEY, "true");
     syncClassSelectorUI();
+
+    const modal = document.getElementById("class-onboarding-modal");
+    if (modal) modal.remove();
 
     const filterClassEl = document.getElementById("filter-class");
     if (filterClassEl) {
-        filterClassEl.value = classValue === "All" ? "all" : classValue;
+        filterClassEl.value = chosen === "All" ? "all" : chosen;
     }
 
     if (document.getElementById("quiz-list")) filterQuizzes();
     if (document.getElementById("materials-list")) renderMaterials(allMaterialsCache);
     if (document.getElementById("tests-list")) renderTests(allTestsCache);
+}
+
+function promptStudentClassOnFirstOpen() {
+    const alreadyPicked = localStorage.getItem(CLASS_PROMPT_SHOWN_KEY) === "true";
+    if (alreadyPicked) return;
+    if (document.getElementById("class-onboarding-modal")) return;
+
+    const modal = document.createElement("div");
+    modal.id = "class-onboarding-modal";
+    modal.className = "fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4";
+    modal.innerHTML = `
+        <div class="glass-card max-w-md w-full p-6 rounded-3xl space-y-4 border border-white/15">
+            <h2 class="text-xl font-bold text-blue-300">🎓 Select Your Class</h2>
+            <p class="text-xs text-gray-300">Choose your class so Future Track shows matching quizzes, study materials, and test series.</p>
+            <div class="grid grid-cols-3 gap-2">
+                ${["8th", "9th", "10th", "11th", "12th", "All"].map(cls => `
+                    <button type="button" onclick="applyStudentClassSelection('${cls}')"
+                            class="py-2.5 px-3 rounded-2xl text-xs font-semibold bg-white/5 hover:bg-blue-600 border border-white/10 transition">
+                        ${cls === "All" ? "All Classes" : `Class ${cls}`}
+                    </button>
+                `).join("")}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
 }
 
 function syncClassSelectorUI() {
@@ -61,6 +98,7 @@ function setCachedStudentName(name) {
 function tryStartApp() {
     if (domLoaded && neonLoaded) {
         syncClassSelectorUI();
+        promptStudentClassOnFirstOpen();
         handleRoute();
     }
 }
@@ -190,13 +228,53 @@ function initSlideshow() {
     }, 5000);
 }
 
-// --- STUDY VAULT & TEST SERIES ---
-
 function matchesSelectedClass(itemClass) {
     const selected = getSelectedClass();
     if (!selected || selected === "All") return true;
     const normalized = String(itemClass || "All").toLowerCase();
     return normalized === "all" || normalized === selected.toLowerCase();
+}
+
+function toEmbeddablePdfUrl(rawUrl) {
+    const url = String(rawUrl || "").trim();
+    if (!url) return "";
+
+    const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (driveFileMatch && driveFileMatch[1]) {
+        return `https://drive.google.com/file/d/${driveFileMatch[1]}/preview`;
+    }
+
+    const driveOpenMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (url.includes("drive.google.com") && driveOpenMatch && driveOpenMatch[1]) {
+        return `https://drive.google.com/file/d/${driveOpenMatch[1]}/preview`;
+    }
+
+    return url;
+}
+
+function openPdfViewerModal(title, rawUrl) {
+    const existing = document.getElementById("onsite-pdf-viewer");
+    if (existing) existing.remove();
+
+    const embedUrl = toEmbeddablePdfUrl(rawUrl);
+    const modal = document.createElement("div");
+    modal.id = "onsite-pdf-viewer";
+    modal.className = "fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex flex-col p-3 sm:p-6";
+    modal.innerHTML = `
+        <div class="max-w-5xl w-full mx-auto flex-grow flex flex-col glass-card rounded-3xl overflow-hidden border border-white/15">
+            <div class="px-5 py-3.5 bg-[#0b1120]/95 border-b border-white/10 flex items-center justify-between gap-3">
+                <h3 class="text-sm sm:text-base font-bold text-blue-300 truncate">${escapeHtml(title || "Document Viewer")}</h3>
+                <div class="flex items-center gap-2">
+                    <a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">External Link</a>
+                    <button type="button" onclick="document.getElementById('onsite-pdf-viewer')?.remove()" class="bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-semibold px-3.5 py-1.5 rounded-xl transition">✕ Close</button>
+                </div>
+            </div>
+            <div class="flex-grow overflow-auto bg-[#060a12]">
+                <iframe src="${escapeHtml(embedUrl)}" class="w-full h-full min-h-[75vh] border-0" loading="lazy"></iframe>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
 }
 
 async function loadMaterialsList() {
@@ -230,7 +308,11 @@ function renderMaterials(items) {
                 </div>
                 <h3 class="text-lg font-bold mt-2">${escapeHtml(m.title)}</h3>
             </div>
-            <a href="${escapeHtml(m.file_url)}" target="_blank" rel="noopener noreferrer" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-blue-600/30">Open / Download PDF</a>
+            <button type="button"
+                    onclick="openPdfViewerModal('${escapeHtml(m.title)}', '${escapeHtml(m.file_url)}')"
+                    class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-blue-600/30">
+                📖 Read PDF on Site
+            </button>
         </div>
     `).join("");
 }
@@ -262,7 +344,7 @@ function renderTests(items) {
         const hasResultPdf = Boolean(t.result_pdf_url && String(t.result_pdf_url).trim());
 
         return `
-            <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
+            <div onclick="openTestDetail(${Number(t.id)})" class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4 cursor-pointer hover:border-blue-400/40 transition">
                 <div class="space-y-2">
                     <div class="flex flex-wrap justify-between items-center gap-2">
                         <div class="flex items-center gap-2">
@@ -272,20 +354,75 @@ function renderTests(items) {
                         <span class="text-xs text-gray-400">📅 ${escapeHtml(formattedDate)}</span>
                     </div>
                     <h3 class="text-lg font-bold pt-1">${escapeHtml(t.test_name)}</h3>
-                    <p class="text-xs text-gray-300">${escapeHtml(t.syllabus)}</p>
+                    <p class="text-xs text-gray-300 line-clamp-2">${escapeHtml(t.syllabus)}</p>
                 </div>
 
-                <div class="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                <div class="pt-2 border-t border-white/10 flex items-center justify-between gap-2 text-xs">
+                    <span class="text-blue-300 font-semibold">Open Test Details →</span>
                     ${hasResultPdf
-                        ? `<a href="${escapeHtml(t.result_pdf_url)}" target="_blank" rel="noopener noreferrer" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-emerald-600/25">📄 View / Download Result PDF</a>`
-                        : `<span class="text-[11px] text-gray-400">Result PDF: Not published yet</span>`
+                        ? `<span class="text-emerald-300 font-semibold">📄 Result PDF Ready</span>`
+                        : `<span class="text-gray-400">Result PDF Pending</span>`
                     }
                 </div>
             </div>
         `;
     }).join("");
 }
-// --- ADMIN CREATE, EDIT & DELETE ---
+
+function openTestDetail(testId) {
+    const container = document.getElementById("tests-list");
+    if (!container) return;
+
+    const test = (allTestsCache || []).find(t => Number(t.id) === Number(testId));
+    if (!test) return;
+
+    const formattedDate = new Date(test.test_date).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+    });
+    const embedPdfUrl = test.result_pdf_url ? toEmbeddablePdfUrl(test.result_pdf_url) : "";
+
+    container.innerHTML = `
+        <div class="col-span-1 md:col-span-2 glass-card p-6 sm:p-8 rounded-3xl space-y-6">
+            <div class="flex flex-wrap justify-between items-start gap-3 border-b border-white/10 pb-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(test.class_level || "All")}</span>
+                        <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(test.subject)}</span>
+                    </div>
+                    <h2 class="text-2xl font-extrabold mt-2">${escapeHtml(test.test_name)}</h2>
+                    <p class="text-xs text-gray-400 mt-1">📅 Test Date: ${escapeHtml(formattedDate)}</p>
+                </div>
+                <button type="button" onclick="renderTests(allTestsCache)" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">
+                    ← All Tests
+                </button>
+            </div>
+
+            <div class="space-y-2">
+                <h3 class="text-sm font-bold text-blue-300">📝 Syllabus</h3>
+                <p class="text-sm text-gray-200 whitespace-pre-line bg-white/5 p-4 rounded-2xl border border-white/10">${escapeHtml(test.syllabus)}</p>
+            </div>
+
+            ${embedPdfUrl ? `
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-sm font-bold text-emerald-300">📄 Test Result PDF</h3>
+                        <button type="button" onclick="openPdfViewerModal('${escapeHtml(test.test_name)} Result', '${escapeHtml(test.result_pdf_url)}')" class="text-xs text-blue-400 hover:underline">Expand Full Reader</button>
+                    </div>
+                    <div class="w-full h-[70vh] overflow-auto rounded-2xl border border-white/10 bg-[#060a12]">
+                        <iframe src="${escapeHtml(embedPdfUrl)}" class="w-full h-full border-0" loading="lazy"></iframe>
+                    </div>
+                </div>
+            ` : `
+                <p class="text-xs text-gray-400">Result PDF has not been uploaded for this test yet.</p>
+            `}
+        </div>
+    `;
+}
+// ============================================================================
+// PART 2 OF 3: ADMIN CREATE, EDIT & DELETE (ITEMS + SINGLE ATTEMPTS)
+// ============================================================================
 
 async function handlePostMaterial(e) {
     e.preventDefault();
@@ -351,12 +488,11 @@ async function handleUploadHtmlQuiz(e) {
 
     try {
         const htmlContent = await file.text();
-        const res = await queryDatabase(
-            "INSERT INTO quizzes (class_level, title, subject, html_content) VALUES ($1, $2, $3, $4) RETURNING id",
+        await queryDatabase(
+            "INSERT INTO quizzes (class_level, title, subject, html_content) VALUES ($1, $2, $3, $4)",
             [classLevel, title, subject, htmlContent]
         );
-        const shareLink = `${window.location.origin}${window.location.pathname}#quiz-${res[0].id}`;
-        alert(`Quiz uploaded!\nShare Link:\n${shareLink}`);
+        alert("HTML Quiz uploaded and published!");
         document.getElementById("html-quiz-form").reset();
         await loadAdminManageLists();
     } catch (err) {
@@ -575,10 +711,8 @@ async function deleteMaterialItem(id) {
     await queryDatabase("DELETE FROM study_materials WHERE id = $1", [id]);
     await renderAdminMaterialsManage();
 }
-
-
 // ============================================================================
-// PART 2: QUIZ PORTAL, CACHED NAME + EDIT, FULLSCREEN & ATTEMPTS
+// PART 3 OF 3: QUIZ PORTAL, CACHED NAME + EDIT, FULLSCREEN & AUTO-RESULT
 // ============================================================================
 
 async function loadQuizzesList() {
@@ -629,19 +763,16 @@ function filterQuizzes() {
     renderQuizzes(filtered);
 }
 
-function getQuizShareLink(quizId) {
-    return `${window.location.origin}${window.location.pathname}#quiz-${quizId}`;
-}
-
-function copyQuizLink(link) {
+function copyQuizShareUrl(quizId) {
+    const shareUrl = `${window.location.origin}${window.location.pathname}#quiz-${Number(quizId)}`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(link).then(() => {
-            alert("Quiz link copied:\n" + link);
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            alert("Share URL copied!");
         }).catch(() => {
-            prompt("Copy quiz link:", link);
+            prompt("Copy Share URL:", shareUrl);
         });
     } else {
-        prompt("Copy quiz link:", link);
+        prompt("Copy Share URL:", shareUrl);
     }
 }
 
@@ -658,7 +789,6 @@ function renderQuizzes(quizzes) {
         const postedDate = q.created_at
             ? new Date(q.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
             : "";
-        const shareLink = getQuizShareLink(q.id);
 
         return `
             <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
@@ -671,11 +801,10 @@ function renderQuizzes(quizzes) {
                         <span class="text-[11px] text-gray-400">${escapeHtml(postedDate)}</span>
                     </div>
                     <h3 class="text-lg font-bold mt-2">${escapeHtml(q.title)}</h3>
-                    <p class="text-[11px] text-gray-400 mt-1 break-all">Link: <span class="text-blue-300">${escapeHtml(shareLink)}</span></p>
                 </div>
                 <div class="flex gap-2">
                     <button type="button" onclick="openQuizById(${Number(q.id)})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex-1">Open Quiz & Results</button>
-                    <button type="button" onclick="copyQuizLink('${escapeHtml(shareLink)}')" class="bg-white/10 hover:bg-white/20 text-gray-200 text-xs font-medium py-2.5 px-3 rounded-xl transition">Copy</button>
+                    <button type="button" onclick="copyQuizShareUrl(${Number(q.id)})" class="bg-white/10 hover:bg-white/20 text-blue-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition">🔗 Copy Share URL</button>
                 </div>
             </div>
         `;
@@ -728,9 +857,7 @@ function enableCachedNameEdit() {
     const editInput = document.getElementById("quiz-start-student-name");
     if (displayWrap) displayWrap.classList.add("hidden");
     if (editWrap) editWrap.classList.remove("hidden");
-    if (editInput) {
-        editInput.focus();
-    }
+    if (editInput) editInput.focus();
 }
 
 async function openQuizById(quizId) {
@@ -755,7 +882,6 @@ async function openQuizById(quizId) {
             [quiz.id]
         );
         const attemptsCount = existingResults ? existingResults.length : 0;
-        const shareUrl = getQuizShareLink(quiz.id);
         const cachedName = getCachedStudentName();
 
         portal.innerHTML = `
@@ -768,12 +894,11 @@ async function openQuizById(quizId) {
                         </div>
                         <h2 class="text-xl font-bold mt-2">${escapeHtml(quiz.title)}</h2>
                         <p class="text-xs text-gray-400 mt-1">Total Attempts: <span class="text-blue-300 font-semibold">${attemptsCount}</span></p>
-                        <div class="flex flex-wrap items-center gap-2 mt-2">
-                            <code class="text-xs text-blue-300 bg-white/5 px-2.5 py-1 rounded-lg break-all">${escapeHtml(shareUrl)}</code>
-                            <button type="button" onclick="copyQuizLink('${escapeHtml(shareUrl)}')" class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 px-3 py-1 rounded-lg border border-blue-500/30 transition">Copy Link</button>
-                        </div>
                     </div>
-                    <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="copyQuizShareUrl(${Number(quiz.id)})" class="bg-blue-600/20 hover:bg-blue-600/35 text-blue-200 border border-blue-500/30 text-xs px-3.5 py-2 rounded-xl transition">🔗 Copy Share URL</button>
+                        <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+                    </div>
                 </div>
 
                 <div class="glass-card p-8 rounded-3xl space-y-4 max-w-xl mx-auto">
@@ -914,8 +1039,14 @@ function startWatchingIframeCompletion(iframe) {
             const doc = iframe?.contentDocument || iframe?.contentWindow?.document;
             if (!doc || !doc.body) return;
 
-            const text = (doc.body.innerText || "").trim();
-            const isCompletedScreen = Boolean(text && /Quiz Complete!/i.test(text));
+            const resultEl = doc.querySelector("#result");
+            const quizEl = doc.querySelector("#quiz");
+            const bodyText = (doc.body.innerText || "").trim();
+            const isCompletedScreen = Boolean(
+                (resultEl && !resultEl.classList.contains("hidden")) ||
+                (quizEl && quizEl.classList.contains("hidden") && resultEl && resultEl.innerText.trim().length > 0) ||
+                /Quiz Complete!|Outstanding!|Excellent work!|Good effort|Revise the chapter/i.test(bodyText)
+            );
 
             if (currentActiveQuizSession.recordedForCurrentRun && !isCompletedScreen) {
                 currentActiveQuizSession.recordedForCurrentRun = false;
@@ -927,16 +1058,18 @@ function startWatchingIframeCompletion(iframe) {
 
             if (!isCompletedScreen || currentActiveQuizSession.recordedForCurrentRun) return;
 
-            const scoreMatch = text.match(/(\d+)\s*\/\s*(\d+)/);
+            const resultText = (resultEl ? resultEl.innerText : bodyText).trim();
+            const scoreMatch = resultText.match(/(\d+)\s*\/\s*(\d+)/);
             const marks = scoreMatch ? Number(scoreMatch[1]) : 0;
             const totalMarks = scoreMatch ? Number(scoreMatch[2]) : 0;
 
             let finalSeconds = secondsElapsed;
-            const timeMatch = text.match(/Time:\s*(?:(\d+)m\s*)?(\d+)s/i);
-            if (timeMatch) {
-                const mins = Number(timeMatch[1] || 0);
-                const secs = Number(timeMatch[2] || 0);
-                finalSeconds = mins * 60 + secs;
+            const minSecMatch = bodyText.match(/Time:\s*(?:(\d+)m\s*)?(\d+)s/i);
+            const mmssMatch = resultText.match(/(\d{2,}):(\d{2})/);
+            if (minSecMatch) {
+                finalSeconds = Number(minSecMatch[1] || 0) * 60 + Number(minSecMatch[2] || 0);
+            } else if (mmssMatch) {
+                finalSeconds = Number(mmssMatch[1] || 0) * 60 + Number(mmssMatch[2] || 0);
             }
 
             currentActiveQuizSession.recordedForCurrentRun = true;
