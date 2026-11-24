@@ -1,5 +1,5 @@
 // ============================================================================
-// PART 1 OF 3: CLASS PROMPT, STATE, ROUTER, SLIDESHOW & VAULT/TESTS
+// PART 1 OF 3: CLASS PROMPT, STATE, ROUTER, SLIDESHOW & FOLDER HELPERS
 // ============================================================================
 
 let domLoaded = false;
@@ -13,6 +13,15 @@ let secondsElapsed = 0;
 let quizWatcherInterval = null;
 let currentActiveQuizSession = null;
 
+let activeMaterialFolderClass = null;
+let activeMaterialFolderSubject = null;
+let activeQuizFolderClass = null;
+let activeQuizFolderSubject = null;
+let activeTestFolderClass = null;
+let activeTestFolderSubject = null;
+
+const CLASS_FOLDERS = ["8th", "9th", "10th", "11th", "12th"];
+const COMMERCE_DEFAULT_SUBJECTS = ["Eco", "BST", "Acc"];
 const CLASS_STORAGE_KEY = "ft_selected_class";
 const CLASS_PROMPT_SHOWN_KEY = "ft_class_prompt_shown";
 const STUDENT_NAME_STORAGE_KEY = "ft_cached_student_name";
@@ -22,10 +31,10 @@ function getSelectedClass() {
 }
 
 function setActiveClass(classValue) {
-    applyStudentClassSelection(classValue);
+    applyStudentClassSelection(classValue, { syncHash: true });
 }
 
-function applyStudentClassSelection(classValue) {
+function applyStudentClassSelection(classValue, opts = {}) {
     const validClasses = ["All", "8th", "9th", "10th", "11th", "12th"];
     const chosen = validClasses.includes(classValue) ? classValue : "All";
 
@@ -36,14 +45,21 @@ function applyStudentClassSelection(classValue) {
     const modal = document.getElementById("class-onboarding-modal");
     if (modal) modal.remove();
 
-    const filterClassEl = document.getElementById("filter-class");
-    if (filterClassEl) {
-        filterClassEl.value = chosen === "All" ? "all" : chosen;
+    if (document.getElementById("materials-list")) {
+        activeMaterialFolderClass = chosen !== "All" ? chosen : null;
+        activeMaterialFolderSubject = null;
+        renderMaterialFoldersOrList(opts);
     }
-
-    if (document.getElementById("quiz-list")) filterQuizzes();
-    if (document.getElementById("materials-list")) renderMaterials(allMaterialsCache);
-    if (document.getElementById("tests-list")) renderTests(allTestsCache);
+    if (document.getElementById("quiz-list")) {
+        activeQuizFolderClass = chosen !== "All" ? chosen : null;
+        activeQuizFolderSubject = null;
+        renderQuizFoldersOrList(opts);
+    }
+    if (document.getElementById("tests-list")) {
+        activeTestFolderClass = chosen !== "All" ? chosen : null;
+        activeTestFolderSubject = null;
+        renderTestFoldersOrList(opts);
+    }
 }
 
 function promptStudentClassOnFirstOpen() {
@@ -57,7 +73,7 @@ function promptStudentClassOnFirstOpen() {
     modal.innerHTML = `
         <div class="glass-card max-w-md w-full p-6 rounded-3xl space-y-4 border border-white/15">
             <h2 class="text-xl font-bold text-blue-300">🎓 Select Your Class</h2>
-            <p class="text-xs text-gray-300">Choose your class so Future Track shows matching quizzes, study materials, and test series.</p>
+            <p class="text-xs text-gray-300">Choose your class so Future Track opens your class folder automatically.</p>
             <div class="grid grid-cols-3 gap-2">
                 ${["8th", "9th", "10th", "11th", "12th", "All"].map(cls => `
                     <button type="button" onclick="applyStudentClassSelection('${cls}')"
@@ -95,6 +111,50 @@ function setCachedStudentName(name) {
     }
 }
 
+function setSectionHash(hashStr) {
+    if (window.location.hash !== hashStr) {
+        history.pushState(null, "", hashStr);
+    }
+}
+
+function normalizeClassParam(raw) {
+    if (!raw) return null;
+    const clean = decodeURIComponent(String(raw)).trim();
+    return CLASS_FOLDERS.find(c => c.toLowerCase() === clean.toLowerCase()) || null;
+}
+
+function getSubjectsForClassFolder(className, items = []) {
+    const cls = String(className || "").trim();
+    const subjects = new Set();
+
+    if (cls === "11th" || cls === "12th") {
+        COMMERCE_DEFAULT_SUBJECTS.forEach(s => subjects.add(s));
+    }
+
+    (items || []).forEach(item => {
+        const itemClass = String(item.class_level || "All").trim();
+        if (itemClass.toLowerCase() === cls.toLowerCase() || itemClass.toLowerCase() === "all") {
+            if (item.subject && String(item.subject).trim()) {
+                subjects.add(String(item.subject).trim());
+            }
+        }
+    });
+
+    if (subjects.size === 0) subjects.add("General");
+    return Array.from(subjects);
+}
+
+function subjectMatches(itemSubject, chosenSubject) {
+    if (!chosenSubject || chosenSubject === "all") return true;
+    const a = String(itemSubject || "").trim().toLowerCase();
+    const b = decodeURIComponent(String(chosenSubject || "")).trim().toLowerCase();
+    if (a === b) return true;
+    if (b === "eco" && (a.includes("econ") || a === "eco")) return true;
+    if (b === "bst" && (a.includes("business") || a === "bst" || a === "b.st")) return true;
+    if (b === "acc" && (a.includes("account") || a === "acc" || a === "accounts")) return true;
+    return false;
+}
+
 function tryStartApp() {
     if (domLoaded && neonLoaded) {
         syncClassSelectorUI();
@@ -120,6 +180,12 @@ window.addEventListener("hashchange", () => {
     }
 });
 
+window.addEventListener("popstate", () => {
+    if (neonLoaded) {
+        handleRoute();
+    }
+});
+
 function cleanupQuizTimers() {
     if (activeQuizTimer) {
         clearInterval(activeQuizTimer);
@@ -132,18 +198,20 @@ function cleanupQuizTimers() {
     currentActiveQuizSession = null;
 }
 
-async function loadPage(pageName) {
+async function loadPage(pageName, opts = {}) {
     cleanupQuizTimers();
     if (slideshowInterval) {
         clearInterval(slideshowInterval);
         slideshowInterval = null;
     }
 
+    if (!opts.skipHashUpdate) {
+        setSectionHash(`#${pageName}`);
+    }
+
     try {
         const response = await fetch(`pages/${pageName}.html`);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const htmlContent = await response.text();
         document.getElementById("app").innerHTML = htmlContent;
         syncClassSelectorUI();
@@ -152,11 +220,11 @@ async function loadPage(pageName) {
         if (pageName === "home") {
             initSlideshow();
         } else if (pageName === "quiz") {
-            await loadQuizzesList();
+            await loadQuizzesList(opts);
         } else if (pageName === "material") {
-            await loadMaterialsList();
+            await loadMaterialsList(opts);
         } else if (pageName === "test") {
-            await loadTestsList();
+            await loadTestsList(opts);
         } else if (pageName === "admin") {
             await loadAdminManageLists();
         }
@@ -172,43 +240,93 @@ async function loadPage(pageName) {
 }
 
 async function handleRoute() {
-    const hash = window.location.hash;
+    const rawHash = (window.location.hash || "#home").replace(/^#/, "");
 
-    if (hash === "#ftadmin") {
+    if (rawHash === "ftadmin") {
         const enteredPin = prompt("Enter Admin Secret PIN:");
         if (!enteredPin) {
-            history.replaceState(null, "", "#home");
-            await loadPage("home");
+            window.location.hash = "#home";
+            await loadPage("home", { skipHashUpdate: true });
             return;
         }
-
         try {
             await verifyAdminPinOnServer(enteredPin);
-            await loadPage("admin");
+            await loadPage("admin", { skipHashUpdate: true });
         } catch (err) {
-            if (typeof setSessionAdminPin === "function") {
-                setSessionAdminPin("");
-            }
+            if (typeof setSessionAdminPin === "function") setSessionAdminPin("");
             alert(err && err.message ? err.message : "Incorrect PIN");
-            history.replaceState(null, "", "#home");
-            await loadPage("home");
+            window.location.hash = "#home";
+            await loadPage("home", { skipHashUpdate: true });
         }
-    } else if (hash && hash.startsWith("#quiz-")) {
-        const quizId = Number(hash.replace("#quiz-", ""));
-        await loadPage("quiz");
-        if (quizId) {
-            await openQuizById(quizId);
-        }
-    } else {
-        await loadPage("home");
+        return;
     }
+
+    if (rawHash.startsWith("pdf-")) {
+        const matId = Number(rawHash.replace("pdf-", ""));
+        await loadPage("material", { skipHashUpdate: true, preserveFolder: true });
+        if (matId) await openMaterialPdfPage(matId, { skipHashUpdate: true });
+        return;
+    }
+
+    if (rawHash === "quiz" || rawHash.startsWith("quiz-")) {
+        const rest = rawHash === "quiz" ? "" : rawHash.replace(/^quiz-/, "");
+        await loadPage("quiz", { skipHashUpdate: true, preserveFolder: Boolean(rest) });
+        if (/^\d+$/.test(rest)) {
+            await openQuizById(Number(rest), { skipHashUpdate: true });
+        } else if (rest) {
+            const parts = rest.split("-");
+            const cls = normalizeClassParam(parts[0]);
+            const subj = parts.slice(1).join("-") || null;
+            if (cls) {
+                activeQuizFolderClass = cls;
+                activeQuizFolderSubject = subj;
+                renderQuizFoldersOrList({ syncHash: false });
+            }
+        }
+        return;
+    }
+
+    if (rawHash === "material" || rawHash.startsWith("material-")) {
+        const rest = rawHash === "material" ? "" : rawHash.replace(/^material-/, "");
+        await loadPage("material", { skipHashUpdate: true, preserveFolder: Boolean(rest) });
+        if (rest) {
+            const parts = rest.split("-");
+            const cls = normalizeClassParam(parts[0]);
+            const subj = parts.slice(1).join("-") || null;
+            if (cls) {
+                activeMaterialFolderClass = cls;
+                activeMaterialFolderSubject = subj;
+                renderMaterialFoldersOrList({ syncHash: false });
+            }
+        }
+        return;
+    }
+
+    if (rawHash === "test" || rawHash.startsWith("test-")) {
+        const rest = rawHash === "test" ? "" : rawHash.replace(/^test-/, "");
+        await loadPage("test", { skipHashUpdate: true, preserveFolder: Boolean(rest) });
+        if (/^\d+$/.test(rest)) {
+            await openTestDetailById(Number(rest), { skipHashUpdate: true });
+        } else if (rest) {
+            const parts = rest.split("-");
+            const cls = normalizeClassParam(parts[0]);
+            const subj = parts.slice(1).join("-") || null;
+            if (cls) {
+                activeTestFolderClass = cls;
+                activeTestFolderSubject = subj;
+                renderTestFoldersOrList({ syncHash: false });
+            }
+        }
+        return;
+    }
+
+    await loadPage("home", { skipHashUpdate: rawHash === "home" });
 }
 
 function initSlideshow() {
     let currentSlide = 0;
     const slides = document.querySelectorAll(".slide");
     const dots = document.querySelectorAll(".dot");
-
     if (slides.length === 0) return;
 
     slideshowInterval = setInterval(() => {
@@ -217,9 +335,7 @@ function initSlideshow() {
             dots[currentSlide].classList.remove("bg-white", "w-4");
             dots[currentSlide].classList.add("bg-white/50", "w-2");
         }
-
         currentSlide = (currentSlide + 1) % slides.length;
-
         slides[currentSlide].style.opacity = "1";
         if (dots[currentSlide]) {
             dots[currentSlide].classList.remove("bg-white/50", "w-2");
@@ -227,13 +343,9 @@ function initSlideshow() {
         }
     }, 5000);
 }
-
-function matchesSelectedClass(itemClass) {
-    const selected = getSelectedClass();
-    if (!selected || selected === "All") return true;
-    const normalized = String(itemClass || "All").toLowerCase();
-    return normalized === "all" || normalized === selected.toLowerCase();
-}
+// ============================================================================
+// PART 2 OF 3: MATERIALS, TESTS, SCROLLABLE PDF VIEWER & ADMIN CRUD
+// ============================================================================
 
 function toEmbeddablePdfUrl(rawUrl) {
     const url = String(rawUrl || "").trim();
@@ -252,103 +364,336 @@ function toEmbeddablePdfUrl(rawUrl) {
     return url;
 }
 
-function openPdfViewerModal(title, rawUrl) {
-    const existing = document.getElementById("onsite-pdf-viewer");
-    if (existing) existing.remove();
-
+function buildPdfReaderHtml({ title, subject, classLevel, rawUrl, shareHash, backActionHtml }) {
     const embedUrl = toEmbeddablePdfUrl(rawUrl);
-    const modal = document.createElement("div");
-    modal.id = "onsite-pdf-viewer";
-    modal.className = "fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex flex-col p-3 sm:p-6";
-    modal.innerHTML = `
-        <div class="max-w-5xl w-full mx-auto flex-grow flex flex-col glass-card rounded-3xl overflow-hidden border border-white/15">
-            <div class="px-5 py-3.5 bg-[#0b1120]/95 border-b border-white/10 flex items-center justify-between gap-3">
-                <h3 class="text-sm sm:text-base font-bold text-blue-300 truncate">${escapeHtml(title || "Document Viewer")}</h3>
-                <div class="flex items-center gap-2">
-                    <a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">External Link</a>
-                    <button type="button" onclick="document.getElementById('onsite-pdf-viewer')?.remove()" class="bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-semibold px-3.5 py-1.5 rounded-xl transition">✕ Close</button>
+    const fullShareUrl = `${window.location.origin}${window.location.pathname}${shareHash}`;
+
+    return `
+        <div class="glass-card p-5 sm:p-7 rounded-3xl space-y-5">
+            <div class="flex flex-wrap justify-between items-center gap-3 border-b border-white/10 pb-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(classLevel || "All")}</span>
+                        ${subject ? `<span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(subject)}</span>` : ""}
+                    </div>
+                    <h2 class="text-xl sm:text-2xl font-extrabold mt-2">${escapeHtml(title || "PDF Document")}</h2>
+                    <p class="text-[11px] text-gray-400 mt-1 break-all">Page Link: <span class="text-blue-300">${escapeHtml(fullShareUrl)}</span></p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer" download
+                       class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-lg shadow-emerald-600/25">
+                        ⬇️ Download PDF
+                    </a>
+                    ${backActionHtml}
                 </div>
             </div>
-            <div class="flex-grow overflow-auto bg-[#060a12]">
-                <iframe src="${escapeHtml(embedUrl)}" class="w-full h-full min-h-[75vh] border-0" loading="lazy"></iframe>
+
+            <div class="w-full h-[75vh] overflow-y-auto rounded-2xl border border-white/15 bg-[#060a12]">
+                <iframe src="${escapeHtml(embedUrl)}" class="w-full min-h-[74vh] h-full border-0" loading="lazy"></iframe>
+            </div>
+
+            <div class="pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
+                <span class="text-xs text-gray-400">Download this PDF:</span>
+                <a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer" download
+                   class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/25">
+                    ⬇️ Download PDF
+                </a>
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
 }
 
-async function loadMaterialsList() {
+async function loadMaterialsList(opts = {}) {
     const container = document.getElementById("materials-list");
     if (!container) return;
 
+    const selectedClass = getSelectedClass();
+    if (!opts.preserveFolder) {
+        activeMaterialFolderClass = selectedClass !== "All" ? selectedClass : null;
+        activeMaterialFolderSubject = null;
+    }
+
     try {
         allMaterialsCache = await queryDatabase("SELECT * FROM study_materials ORDER BY uploaded_at DESC");
-        renderMaterials(allMaterialsCache);
+        renderMaterialFoldersOrList(opts);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load materials: ${escapeHtml(err.message)}</p>`;
     }
 }
 
-function renderMaterials(items) {
+function selectMaterialFolder(className, subjectName = null) {
+    activeMaterialFolderClass = className;
+    activeMaterialFolderSubject = subjectName;
+    renderMaterialFoldersOrList({ syncHash: true });
+}
+
+function renderMaterialFoldersOrList(opts = {}) {
     const container = document.getElementById("materials-list");
     if (!container) return;
 
-    const filtered = (items || []).filter(m => matchesSelectedClass(m.class_level));
-    if (filtered.length === 0) {
-        container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No study materials for ${escapeHtml(getSelectedClass())} yet.</p>`;
+    const selectedClass = getSelectedClass();
+    if (!activeMaterialFolderClass && selectedClass !== "All") {
+        activeMaterialFolderClass = selectedClass;
+    }
+
+    if (!activeMaterialFolderClass) {
+        if (opts.syncHash !== false) setSectionHash("#material");
+        container.innerHTML = CLASS_FOLDERS.map(cls => {
+            const count = (allMaterialsCache || []).filter(m => {
+                const c = String(m.class_level || "All").toLowerCase();
+                return c === cls.toLowerCase() || c === "all";
+            }).length;
+            return `
+                <div onclick="selectMaterialFolder('${cls}', null)" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                    <div>
+                        <span class="text-2xl">📁</span>
+                        <h3 class="text-lg font-bold mt-2">Class ${cls}</h3>
+                        <p class="text-xs text-gray-400">${count} study file(s)</p>
+                    </div>
+                    <span class="text-xs text-blue-300 font-semibold">Open Folder →</span>
+                </div>
+            `;
+        }).join("");
         return;
     }
 
-    container.innerHTML = filtered.map(m => `
+    if (!activeMaterialFolderSubject) {
+        if (opts.syncHash !== false) setSectionHash(`#material-${encodeURIComponent(activeMaterialFolderClass)}`);
+        const subjects = getSubjectsForClassFolder(activeMaterialFolderClass, allMaterialsCache);
+
+        container.innerHTML = `
+            <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+                <div class="text-xs text-gray-300">
+                    📁 Class <strong class="text-blue-300">${escapeHtml(activeMaterialFolderClass)}</strong> / Choose Subject Folder
+                </div>
+                <button type="button" onclick="activeMaterialFolderClass=null; activeMaterialFolderSubject=null; renderMaterialFoldersOrList();" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                    ← All Class Folders
+                </button>
+            </div>
+            ${subjects.map(subj => {
+                const subCount = (allMaterialsCache || []).filter(m => {
+                    const c = String(m.class_level || "All").toLowerCase();
+                    const inClass = c === activeMaterialFolderClass.toLowerCase() || c === "all";
+                    return inClass && subjectMatches(m.subject, subj);
+                }).length;
+
+                return `
+                    <div onclick="selectMaterialFolder('${escapeHtml(activeMaterialFolderClass)}', '${escapeHtml(subj)}')" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                        <div>
+                            <span class="text-xl">📂</span>
+                            <h3 class="text-lg font-bold mt-2">${escapeHtml(subj)}</h3>
+                            <p class="text-xs text-gray-400">Class ${escapeHtml(activeMaterialFolderClass)} • ${subCount} PDF(s)</p>
+                        </div>
+                        <span class="text-xs text-blue-300 font-semibold">Open →</span>
+                    </div>
+                `;
+            }).join("")}
+        `;
+        return;
+    }
+
+    if (opts.syncHash !== false) {
+        setSectionHash(`#material-${encodeURIComponent(activeMaterialFolderClass)}-${encodeURIComponent(activeMaterialFolderSubject)}`);
+    }
+
+    const items = (allMaterialsCache || []).filter(m => {
+        const c = String(m.class_level || "All").toLowerCase();
+        const inClass = c === activeMaterialFolderClass.toLowerCase() || c === "all";
+        return inClass && subjectMatches(m.subject, activeMaterialFolderSubject);
+    });
+
+    const headerBar = `
+        <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+            <div class="text-xs text-gray-300">
+                📁 Class <strong class="text-blue-300">${escapeHtml(activeMaterialFolderClass)}</strong> / 📂 <strong class="text-indigo-300">${escapeHtml(activeMaterialFolderSubject)}</strong>
+            </div>
+            <button type="button" onclick="selectMaterialFolder('${escapeHtml(activeMaterialFolderClass)}', null)" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                ← Subject Folders
+            </button>
+        </div>
+    `;
+
+    if (items.length === 0) {
+        container.innerHTML = headerBar + `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No PDFs in this folder yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = headerBar + items.map(m => `
         <div class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4">
             <div>
                 <div class="flex items-center gap-2">
-                    <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(m.class_level || "All")}</span>
+                    <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(m.class_level || activeMaterialFolderClass)}</span>
                     <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(m.subject)}</span>
                 </div>
                 <h3 class="text-lg font-bold mt-2">${escapeHtml(m.title)}</h3>
             </div>
             <button type="button"
-                    onclick="openPdfViewerModal('${escapeHtml(m.title)}', '${escapeHtml(m.file_url)}')"
+                    onclick="openMaterialPdfPage(${Number(m.id)})"
                     class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition text-center shadow-lg shadow-blue-600/30">
-                📖 Read PDF on Site
+                📖 Open PDF Page
             </button>
         </div>
     `).join("");
 }
 
-async function loadTestsList() {
+async function openMaterialPdfPage(materialId, opts = {}) {
+    const container = document.getElementById("materials-list");
+    if (!container) return;
+
+    let item = (allMaterialsCache || []).find(m => Number(m.id) === Number(materialId));
+    if (!item) {
+        const rows = await queryDatabase("SELECT * FROM study_materials WHERE id = $1", [materialId]);
+        item = rows && rows[0];
+    }
+    if (!item) {
+        container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">PDF not found.</p>`;
+        return;
+    }
+
+    if (!opts.skipHashUpdate) {
+        setSectionHash(`#pdf-${Number(item.id)}`);
+    }
+
+    container.innerHTML = `
+        <div class="col-span-1 md:col-span-2">
+            ${buildPdfReaderHtml({
+                title: item.title,
+                subject: item.subject,
+                classLevel: item.class_level || activeMaterialFolderClass || "All",
+                rawUrl: item.file_url,
+                shareHash: `#pdf-${Number(item.id)}`,
+                backActionHtml: `<button type="button" onclick="renderMaterialFoldersOrList()" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← Back</button>`
+            })}
+        </div>
+    `;
+}
+
+async function loadTestsList(opts = {}) {
     const container = document.getElementById("tests-list");
     if (!container) return;
 
+    const selectedClass = getSelectedClass();
+    if (!opts.preserveFolder) {
+        activeTestFolderClass = selectedClass !== "All" ? selectedClass : null;
+        activeTestFolderSubject = null;
+    }
+
     try {
         allTestsCache = await queryDatabase("SELECT * FROM test_timetables ORDER BY test_date ASC");
-        renderTests(allTestsCache);
+        renderTestFoldersOrList(opts);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load test schedule: ${escapeHtml(err.message)}</p>`;
     }
 }
 
-function renderTests(items) {
+function selectTestFolder(className, subjectName = null) {
+    activeTestFolderClass = className;
+    activeTestFolderSubject = subjectName;
+    renderTestFoldersOrList({ syncHash: true });
+}
+
+function renderTestFoldersOrList(opts = {}) {
     const container = document.getElementById("tests-list");
     if (!container) return;
 
-    const filtered = (items || []).filter(t => matchesSelectedClass(t.class_level));
-    if (filtered.length === 0) {
-        container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No tests scheduled for ${escapeHtml(getSelectedClass())} yet.</p>`;
+    const selectedClass = getSelectedClass();
+    if (!activeTestFolderClass && selectedClass !== "All") {
+        activeTestFolderClass = selectedClass;
+    }
+
+    if (!activeTestFolderClass) {
+        if (opts.syncHash !== false) setSectionHash("#test");
+        container.innerHTML = CLASS_FOLDERS.map(cls => {
+            const count = (allTestsCache || []).filter(t => {
+                const c = String(t.class_level || "All").toLowerCase();
+                return c === cls.toLowerCase() || c === "all";
+            }).length;
+            return `
+                <div onclick="selectTestFolder('${cls}', null)" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                    <div>
+                        <span class="text-2xl">📁</span>
+                        <h3 class="text-lg font-bold mt-2">Class ${cls}</h3>
+                        <p class="text-xs text-gray-400">${count} test(s)</p>
+                    </div>
+                    <span class="text-xs text-blue-300 font-semibold">Open Folder →</span>
+                </div>
+            `;
+        }).join("");
         return;
     }
 
-    container.innerHTML = filtered.map(t => {
+    if (!activeTestFolderSubject) {
+        if (opts.syncHash !== false) setSectionHash(`#test-${encodeURIComponent(activeTestFolderClass)}`);
+        const subjects = getSubjectsForClassFolder(activeTestFolderClass, allTestsCache);
+
+        container.innerHTML = `
+            <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+                <div class="text-xs text-gray-300">
+                    📁 Class <strong class="text-blue-300">${escapeHtml(activeTestFolderClass)}</strong> / Choose Subject Folder
+                </div>
+                <button type="button" onclick="activeTestFolderClass=null; activeTestFolderSubject=null; renderTestFoldersOrList();" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                    ← All Class Folders
+                </button>
+            </div>
+            ${subjects.map(subj => {
+                const subCount = (allTestsCache || []).filter(t => {
+                    const c = String(t.class_level || "All").toLowerCase();
+                    const inClass = c === activeTestFolderClass.toLowerCase() || c === "all";
+                    return inClass && subjectMatches(t.subject, subj);
+                }).length;
+
+                return `
+                    <div onclick="selectTestFolder('${escapeHtml(activeTestFolderClass)}', '${escapeHtml(subj)}')" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                        <div>
+                            <span class="text-xl">📂</span>
+                            <h3 class="text-lg font-bold mt-2">${escapeHtml(subj)}</h3>
+                            <p class="text-xs text-gray-400">Class ${escapeHtml(activeTestFolderClass)} • ${subCount} test(s)</p>
+                        </div>
+                        <span class="text-xs text-blue-300 font-semibold">Open →</span>
+                    </div>
+                `;
+            }).join("")}
+        `;
+        return;
+    }
+
+    if (opts.syncHash !== false) {
+        setSectionHash(`#test-${encodeURIComponent(activeTestFolderClass)}-${encodeURIComponent(activeTestFolderSubject)}`);
+    }
+
+    const items = (allTestsCache || []).filter(t => {
+        const c = String(t.class_level || "All").toLowerCase();
+        const inClass = c === activeTestFolderClass.toLowerCase() || c === "all";
+        return inClass && subjectMatches(t.subject, activeTestFolderSubject);
+    });
+
+    const headerBar = `
+        <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+            <div class="text-xs text-gray-300">
+                📁 Class <strong class="text-blue-300">${escapeHtml(activeTestFolderClass)}</strong> / 📂 <strong class="text-indigo-300">${escapeHtml(activeTestFolderSubject)}</strong>
+            </div>
+            <button type="button" onclick="selectTestFolder('${escapeHtml(activeTestFolderClass)}', null)" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                ← Subject Folders
+            </button>
+        </div>
+    `;
+
+    if (items.length === 0) {
+        container.innerHTML = headerBar + `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No tests in this folder yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = headerBar + items.map(t => {
         const formattedDate = new Date(t.test_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
         const hasResultPdf = Boolean(t.result_pdf_url && String(t.result_pdf_url).trim());
 
         return `
-            <div onclick="openTestDetail(${Number(t.id)})" class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4 cursor-pointer hover:border-blue-400/40 transition">
+            <div onclick="openTestDetailById(${Number(t.id)})" class="glass-card p-6 rounded-3xl flex flex-col justify-between space-y-4 cursor-pointer hover:border-blue-400/50 transition">
                 <div class="space-y-2">
                     <div class="flex flex-wrap justify-between items-center gap-2">
                         <div class="flex items-center gap-2">
-                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(t.class_level || "All")}</span>
+                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(t.class_level || activeTestFolderClass)}</span>
                             <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(t.subject)}</span>
                         </div>
                         <span class="text-xs text-gray-400">📅 ${escapeHtml(formattedDate)}</span>
@@ -358,7 +703,7 @@ function renderTests(items) {
                 </div>
 
                 <div class="pt-2 border-t border-white/10 flex items-center justify-between gap-2 text-xs">
-                    <span class="text-blue-300 font-semibold">Open Test Details →</span>
+                    <span class="text-blue-300 font-semibold">Open Test Page →</span>
                     ${hasResultPdf
                         ? `<span class="text-emerald-300 font-semibold">📄 Result PDF Ready</span>`
                         : `<span class="text-gray-400">Result PDF Pending</span>`
@@ -369,19 +714,28 @@ function renderTests(items) {
     }).join("");
 }
 
-function openTestDetail(testId) {
+async function openTestDetailById(testId, opts = {}) {
     const container = document.getElementById("tests-list");
     if (!container) return;
 
-    const test = (allTestsCache || []).find(t => Number(t.id) === Number(testId));
+    let test = (allTestsCache || []).find(t => Number(t.id) === Number(testId));
+    if (!test) {
+        const rows = await queryDatabase("SELECT * FROM test_timetables WHERE id = $1", [testId]);
+        test = rows && rows[0];
+    }
     if (!test) return;
+
+    if (!opts.skipHashUpdate) {
+        setSectionHash(`#test-${Number(test.id)}`);
+    }
 
     const formattedDate = new Date(test.test_date).toLocaleDateString("en-IN", {
         day: "numeric",
         month: "short",
         year: "numeric"
     });
-    const embedPdfUrl = test.result_pdf_url ? toEmbeddablePdfUrl(test.result_pdf_url) : "";
+    const hasResultPdf = Boolean(test.result_pdf_url && String(test.result_pdf_url).trim());
+    const embedPdfUrl = hasResultPdf ? toEmbeddablePdfUrl(test.result_pdf_url) : "";
 
     container.innerHTML = `
         <div class="col-span-1 md:col-span-2 glass-card p-6 sm:p-8 rounded-3xl space-y-6">
@@ -394,9 +748,10 @@ function openTestDetail(testId) {
                     <h2 class="text-2xl font-extrabold mt-2">${escapeHtml(test.test_name)}</h2>
                     <p class="text-xs text-gray-400 mt-1">📅 Test Date: ${escapeHtml(formattedDate)}</p>
                 </div>
-                <button type="button" onclick="renderTests(allTestsCache)" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">
-                    ← All Tests
-                </button>
+                <div class="flex gap-2">
+                    <button type="button" onclick="copyShareUrlByHash('#test-${Number(test.id)}')" class="bg-blue-600/20 hover:bg-blue-600/35 text-blue-200 border border-blue-500/30 text-xs px-3.5 py-2 rounded-xl transition">🔗 Copy Share URL</button>
+                    <button type="button" onclick="renderTestFoldersOrList()" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← Back</button>
+                </div>
             </div>
 
             <div class="space-y-2">
@@ -404,25 +759,25 @@ function openTestDetail(testId) {
                 <p class="text-sm text-gray-200 whitespace-pre-line bg-white/5 p-4 rounded-2xl border border-white/10">${escapeHtml(test.syllabus)}</p>
             </div>
 
-            ${embedPdfUrl ? `
-                <div class="space-y-3">
-                    <div class="flex justify-between items-center">
+            ${hasResultPdf ? `
+                <div class="space-y-4">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
                         <h3 class="text-sm font-bold text-emerald-300">📄 Test Result PDF</h3>
-                        <button type="button" onclick="openPdfViewerModal('${escapeHtml(test.test_name)} Result', '${escapeHtml(test.result_pdf_url)}')" class="text-xs text-blue-400 hover:underline">Expand Full Reader</button>
+                        <a href="${escapeHtml(test.result_pdf_url)}" target="_blank" rel="noopener noreferrer" download class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition">⬇️ Download PDF</a>
                     </div>
-                    <div class="w-full h-[70vh] overflow-auto rounded-2xl border border-white/10 bg-[#060a12]">
+                    <div class="w-full h-[70vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#060a12]">
                         <iframe src="${escapeHtml(embedPdfUrl)}" class="w-full h-full border-0" loading="lazy"></iframe>
+                    </div>
+                    <div class="pt-2 flex justify-end">
+                        <a href="${escapeHtml(test.result_pdf_url)}" target="_blank" rel="noopener noreferrer" download class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition">⬇️ Download PDF</a>
                     </div>
                 </div>
             ` : `
-                <p class="text-xs text-gray-400">Result PDF has not been uploaded for this test yet.</p>
+                <p class="text-xs text-gray-400">Result PDF has not been published for this test yet.</p>
             `}
         </div>
     `;
 }
-// ============================================================================
-// PART 2 OF 3: ADMIN CREATE, EDIT & DELETE (ITEMS + SINGLE ATTEMPTS)
-// ============================================================================
 
 async function handlePostMaterial(e) {
     e.preventDefault();
@@ -712,80 +1067,148 @@ async function deleteMaterialItem(id) {
     await renderAdminMaterialsManage();
 }
 // ============================================================================
-// PART 3 OF 3: QUIZ PORTAL, CACHED NAME + EDIT, FULLSCREEN & AUTO-RESULT
+// PART 3 OF 3: QUIZ FOLDERS, SHARE URL, FULLSCREEN, AUTO-RESULT & ATTEMPTS
 // ============================================================================
 
-async function loadQuizzesList() {
+async function loadQuizzesList(opts = {}) {
     const container = document.getElementById("quiz-list");
     if (!container) return;
 
-    const filterClassEl = document.getElementById("filter-class");
     const selectedClass = getSelectedClass();
-    if (filterClassEl && selectedClass !== "All") {
-        filterClassEl.value = selectedClass;
+    if (!opts.preserveFolder) {
+        activeQuizFolderClass = selectedClass !== "All" ? selectedClass : null;
+        activeQuizFolderSubject = null;
     }
 
     try {
         allQuizzesCache = await queryDatabase("SELECT id, title, subject, class_level, html_url, created_at FROM quizzes ORDER BY created_at DESC");
-        filterQuizzes();
+        renderQuizFoldersOrList(opts);
     } catch (err) {
         container.innerHTML = `<p class="text-red-400 text-sm col-span-2 text-center py-8">Failed to load quizzes: ${escapeHtml(err.message)}</p>`;
     }
 }
 
+function selectQuizFolder(className, subjectName = null) {
+    activeQuizFolderClass = className;
+    activeQuizFolderSubject = subjectName;
+    renderQuizFoldersOrList({ syncHash: true });
+}
+
 function filterQuizzes() {
-    const dropdownClass = document.getElementById("filter-class")?.value || "all";
-    const activeTopClass = getSelectedClass();
-    const effectiveClass = dropdownClass !== "all" ? dropdownClass : activeTopClass;
-
-    const subjectFilter = document.getElementById("filter-subject")?.value || "all";
     const sortOrder = document.getElementById("filter-sort")?.value || "newest";
-
-    let filtered = [...allQuizzesCache];
-
-    if (effectiveClass && effectiveClass.toLowerCase() !== "all") {
-        filtered = filtered.filter(q => {
-            const qClass = String(q.class_level || "All").toLowerCase();
-            return qClass === "all" || qClass === effectiveClass.toLowerCase();
-        });
-    }
-
-    if (subjectFilter !== "all") {
-        filtered = filtered.filter(q => String(q.subject).toLowerCase() === subjectFilter.toLowerCase());
-    }
-
-    filtered.sort((a, b) => {
+    allQuizzesCache.sort((a, b) => {
         const dateA = new Date(a.created_at).getTime();
         const dateB = new Date(b.created_at).getTime();
         return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
     });
-
-    renderQuizzes(filtered);
+    renderQuizFoldersOrList({ syncHash: false });
 }
 
-function copyQuizShareUrl(quizId) {
-    const shareUrl = `${window.location.origin}${window.location.pathname}#quiz-${Number(quizId)}`;
+function copyShareUrlByHash(hashTarget) {
+    const fullUrl = `${window.location.origin}${window.location.pathname}${hashTarget}`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(shareUrl).then(() => {
+        navigator.clipboard.writeText(fullUrl).then(() => {
             alert("Share URL copied!");
         }).catch(() => {
-            prompt("Copy Share URL:", shareUrl);
+            prompt("Copy Share URL:", fullUrl);
         });
     } else {
-        prompt("Copy Share URL:", shareUrl);
+        prompt("Copy Share URL:", fullUrl);
     }
 }
 
-function renderQuizzes(quizzes) {
+function renderQuizFoldersOrList(opts = {}) {
     const container = document.getElementById("quiz-list");
     if (!container) return;
 
-    if (!quizzes || quizzes.length === 0) {
-        container.innerHTML = `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No quizzes found matching your filter.</p>`;
+    const selectedClass = getSelectedClass();
+    if (!activeQuizFolderClass && selectedClass !== "All") {
+        activeQuizFolderClass = selectedClass;
+    }
+
+    if (!activeQuizFolderClass) {
+        if (opts.syncHash !== false) setSectionHash("#quiz");
+        container.innerHTML = CLASS_FOLDERS.map(cls => {
+            const count = (allQuizzesCache || []).filter(q => {
+                const c = String(q.class_level || "All").toLowerCase();
+                return c === cls.toLowerCase() || c === "all";
+            }).length;
+            return `
+                <div onclick="selectQuizFolder('${cls}', null)" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                    <div>
+                        <span class="text-2xl">📁</span>
+                        <h3 class="text-lg font-bold mt-2">Class ${cls}</h3>
+                        <p class="text-xs text-gray-400">${count} quiz(zes)</p>
+                    </div>
+                    <span class="text-xs text-blue-300 font-semibold">Open Folder →</span>
+                </div>
+            `;
+        }).join("");
         return;
     }
 
-    container.innerHTML = quizzes.map(q => {
+    if (!activeQuizFolderSubject) {
+        if (opts.syncHash !== false) setSectionHash(`#quiz-${encodeURIComponent(activeQuizFolderClass)}`);
+        const subjects = getSubjectsForClassFolder(activeQuizFolderClass, allQuizzesCache);
+
+        container.innerHTML = `
+            <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+                <div class="text-xs text-gray-300">
+                    📁 Class <strong class="text-blue-300">${escapeHtml(activeQuizFolderClass)}</strong> / Choose Subject Folder
+                </div>
+                <button type="button" onclick="activeQuizFolderClass=null; activeQuizFolderSubject=null; renderQuizFoldersOrList();" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                    ← All Class Folders
+                </button>
+            </div>
+            ${subjects.map(subj => {
+                const subCount = (allQuizzesCache || []).filter(q => {
+                    const c = String(q.class_level || "All").toLowerCase();
+                    const inClass = c === activeQuizFolderClass.toLowerCase() || c === "all";
+                    return inClass && subjectMatches(q.subject, subj);
+                }).length;
+
+                return `
+                    <div onclick="selectQuizFolder('${escapeHtml(activeQuizFolderClass)}', '${escapeHtml(subj)}')" class="glass-card p-6 rounded-3xl cursor-pointer hover:border-blue-400/50 transition flex items-center justify-between">
+                        <div>
+                            <span class="text-xl">📂</span>
+                            <h3 class="text-lg font-bold mt-2">${escapeHtml(subj)}</h3>
+                            <p class="text-xs text-gray-400">Class ${escapeHtml(activeQuizFolderClass)} • ${subCount} quiz(zes)</p>
+                        </div>
+                        <span class="text-xs text-blue-300 font-semibold">Open →</span>
+                    </div>
+                `;
+            }).join("")}
+        `;
+        return;
+    }
+
+    if (opts.syncHash !== false) {
+        setSectionHash(`#quiz-${encodeURIComponent(activeQuizFolderClass)}-${encodeURIComponent(activeQuizFolderSubject)}`);
+    }
+
+    const quizzes = (allQuizzesCache || []).filter(q => {
+        const c = String(q.class_level || "All").toLowerCase();
+        const inClass = c === activeQuizFolderClass.toLowerCase() || c === "all";
+        return inClass && subjectMatches(q.subject, activeQuizFolderSubject);
+    });
+
+    const headerBar = `
+        <div class="col-span-1 md:col-span-2 flex flex-wrap justify-between items-center gap-2 glass-card px-5 py-3.5 rounded-2xl">
+            <div class="text-xs text-gray-300">
+                📁 Class <strong class="text-blue-300">${escapeHtml(activeQuizFolderClass)}</strong> / 📂 <strong class="text-indigo-300">${escapeHtml(activeQuizFolderSubject)}</strong>
+            </div>
+            <button type="button" onclick="selectQuizFolder('${escapeHtml(activeQuizFolderClass)}', null)" class="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition">
+                ← Subject Folders
+            </button>
+        </div>
+    `;
+
+    if (quizzes.length === 0) {
+        container.innerHTML = headerBar + `<p class="text-gray-400 text-sm col-span-2 text-center py-8">No quizzes in this folder yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = headerBar + quizzes.map(q => {
         const postedDate = q.created_at
             ? new Date(q.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
             : "";
@@ -795,7 +1218,7 @@ function renderQuizzes(quizzes) {
                 <div>
                     <div class="flex justify-between items-center gap-2">
                         <div class="flex items-center gap-1.5">
-                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(q.class_level || "All")}</span>
+                            <span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2.5 py-1 rounded-full border border-indigo-500/25">Class ${escapeHtml(q.class_level || activeQuizFolderClass)}</span>
                             <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${escapeHtml(q.subject)}</span>
                         </div>
                         <span class="text-[11px] text-gray-400">${escapeHtml(postedDate)}</span>
@@ -804,7 +1227,7 @@ function renderQuizzes(quizzes) {
                 </div>
                 <div class="flex gap-2">
                     <button type="button" onclick="openQuizById(${Number(q.id)})" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium py-2.5 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex-1">Open Quiz & Results</button>
-                    <button type="button" onclick="copyQuizShareUrl(${Number(q.id)})" class="bg-white/10 hover:bg-white/20 text-blue-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition">🔗 Copy Share URL</button>
+                    <button type="button" onclick="copyShareUrlByHash('#quiz-${Number(q.id)}')" class="bg-white/10 hover:bg-white/20 text-blue-200 text-xs font-medium py-2.5 px-3.5 rounded-xl transition">🔗 Copy Share URL</button>
                 </div>
             </div>
         `;
@@ -860,12 +1283,14 @@ function enableCachedNameEdit() {
     if (editInput) editInput.focus();
 }
 
-async function openQuizById(quizId) {
+async function openQuizById(quizId, opts = {}) {
     cleanupQuizTimers();
     const portal = document.getElementById("quiz-portal-container");
     if (!portal) return;
 
-    history.replaceState(null, "", `#quiz-${quizId}`);
+    if (!opts.skipHashUpdate) {
+        setSectionHash(`#quiz-${Number(quizId)}`);
+    }
     portal.innerHTML = `<p class="text-gray-400 text-sm text-center py-8">Loading quiz...</p>`;
 
     try {
@@ -896,8 +1321,8 @@ async function openQuizById(quizId) {
                         <p class="text-xs text-gray-400 mt-1">Total Attempts: <span class="text-blue-300 font-semibold">${attemptsCount}</span></p>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button type="button" onclick="copyQuizShareUrl(${Number(quiz.id)})" class="bg-blue-600/20 hover:bg-blue-600/35 text-blue-200 border border-blue-500/30 text-xs px-3.5 py-2 rounded-xl transition">🔗 Copy Share URL</button>
-                        <button type="button" onclick="history.replaceState(null, '', '#quiz'); loadPage('quiz');" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← All Quizzes</button>
+                        <button type="button" onclick="copyShareUrlByHash('#quiz-${Number(quiz.id)}')" class="bg-blue-600/20 hover:bg-blue-600/35 text-blue-200 border border-blue-500/30 text-xs px-3.5 py-2 rounded-xl transition">🔗 Copy Share URL</button>
+                        <button type="button" onclick="renderQuizFoldersOrList()" class="bg-white/10 hover:bg-white/20 text-xs px-4 py-2 rounded-xl transition">← Back</button>
                     </div>
                 </div>
 
@@ -1102,7 +1527,6 @@ async function exitQuizFullscreenAndReturn() {
         } catch (_) {}
     }
     cleanupQuizTimers();
-    history.replaceState(null, "", "#quiz");
     await loadPage("quiz");
 }
 
